@@ -96,36 +96,59 @@ FROM arnold.segment_test_line
 -- 2. the road and the sidewalk are parallel to each other (between 0-30 or 165/195 or 330-360 degree)
 -- 3. the start and end point of the sidewalk should be satisfy at least 2 (spsp/epep/mpmp/spep/epsp) TODO
 
-l
-SELECT DISTINCT sidewalk.geom, road.geom, ABS(DEGREES( ST_Angle(road.geom, sidewalk.geom) )),
-				ST_Distance(ST_StartPoint(road.geom), ST_StartPoint(sidewalk.geom)),
-				ST_Distance(ST_EndPoint(road.geom), ST_EndPoint(sidewalk.geom)),
-				ST_Distance(ST_StartPoint(road.geom), ST_EndPoint(sidewalk.geom)),
-				ST_Distance(ST_EndPoint(road.geom), ST_StartPoint(sidewalk.geom)),
-				ST_Distance(ST_LineInterpolatePoint(road.geom, 0.5), ST_LineInterpolatePoint(sidewalk.geom, 0.5)),
-				ST_length(sidewalk.geom)
+-- DISCARD THIS CODE
+SELECT DISTINCT sidewalk.osm_id
 FROM osm_sidewalk_udistrict1 sidewalk
 JOIN arnold.segment_test_line road
-ON ST_Intersects(ST_Buffer(sidewalk.geom, 2), ST_Buffer(road.geom, 15))
-WHERE ( ABS(DEGREES( ST_Angle(road.geom, sidewalk.geom) )) BETWEEN 0 AND 45 -- PARALLEL 
-  		OR ABS(DEGREES( ST_Angle(road.geom, sidewalk.geom) )) BETWEEN 160 AND 200
-  		OR ABS(DEGREES( ST_Angle(road.geom, sidewalk.geom) )) BETWEEN 320 AND 360  )
+ON ST_Intersects(ST_Buffer(sidewalk.geom, 2), ST_Buffer(road.geom, 15)) -- need TO MODIFY so so we have better number
+WHERE ( ABS(DEGREES( ST_Angle(road.geom, sidewalk.geom) )) BETWEEN 0 AND 10 -- 0 
+  		OR ABS(DEGREES( ST_Angle(road.geom, sidewalk.geom) )) BETWEEN 170 AND 190 --180
+  		OR ABS(DEGREES( ST_Angle(road.geom, sidewalk.geom) )) BETWEEN 330 AND 360  ) --360
   AND ( 
-  		ST_length(sidewalk.geom) < 10   --
-
-  		OR (
-	  		   (ST_Distance(ST_StartPoint(road.geom), ST_StartPoint(sidewalk.geom)) < 45 AND ST_Distance(ST_EndPoint(road.geom), ST_EndPoint(sidewalk.geom)) < 45)
-	        OR (ST_Distance(ST_StartPoint(road.geom), ST_StartPoint(sidewalk.geom)) < 45 AND ST_Distance(ST_StartPoint(road.geom), ST_EndPoint(sidewalk.geom)) < 45)
-	        OR (ST_Distance(ST_StartPoint(road.geom), ST_StartPoint(sidewalk.geom)) < 45 AND ST_Distance(ST_EndPoint(road.geom), ST_StartPoint(sidewalk.geom)) < 45)
-	        OR (ST_Distance(ST_EndPoint(road.geom), ST_EndPoint(sidewalk.geom)) < 45 AND ST_Distance(ST_StartPoint(road.geom), ST_EndPoint(sidewalk.geom)) < 45)
-	        OR (ST_Distance(ST_EndPoint(road.geom), ST_EndPoint(sidewalk.geom)) < 45 AND ST_Distance(ST_StartPoint(road.geom), ST_StartPoint(sidewalk.geom)) < 45)
-	        OR (ST_Distance(ST_EndPoint(road.geom), ST_EndPoint(sidewalk.geom)) < 45 AND ST_Distance(ST_EndPoint(road.geom), ST_StartPoint(sidewalk.geom)) < 45)
-	        OR (ST_Distance(ST_StartPoint(road.geom), ST_EndPoint(sidewalk.geom)) < 45 AND ST_Distance(ST_StartPoint(road.geom), ST_StartPoint(sidewalk.geom)) < 45)
-	        OR (ST_Distance(ST_StartPoint(road.geom), ST_EndPoint(sidewalk.geom)) < 45 AND ST_Distance(ST_EndPoint(road.geom), ST_EndPoint(sidewalk.geom)) < 45)
-
-  		)
-    );
+  		ST_length(sidewalk.geom) > 9 ); -- IS this a good number?? how DO we decide??
   
-   
-   
+ 
+ -- USE THIS
+ WITH ranked_roads AS (
+  SELECT
+    sidewalk.osm_id AS sidewalk_id,
+  	sidewalk.geom AS sidewalk_geom,
+    road.geom AS road_geom,
+    ABS(DEGREES(ST_Angle(road.geom, sidewalk.geom))) AS angle_degrees,
+    ST_Distance(ST_StartPoint(road.geom), ST_StartPoint(sidewalk.geom)) AS start_start_distance,
+    ST_Distance(ST_EndPoint(road.geom), ST_EndPoint(sidewalk.geom)) AS end_end_distance,
+    ST_Distance(ST_StartPoint(road.geom), ST_EndPoint(sidewalk.geom)) AS start_end_distance,
+    ST_Distance(ST_EndPoint(road.geom), ST_StartPoint(sidewalk.geom)) AS end_start_distance,
+    ST_Distance(ST_LineInterpolatePoint(road.geom, 0.5), ST_LineInterpolatePoint(sidewalk.geom, 0.5)) AS midpoints_distance,
+    ST_length(sidewalk.geom) AS sidewalk_length,
+    ROW_NUMBER() OVER (PARTITION BY sidewalk.geom ORDER BY ST_Distance(ST_LineInterpolatePoint(road.geom, 0.5), ST_LineInterpolatePoint(sidewalk.geom, 0.5)) ) AS rank
+  FROM
+    osm_sidewalk_udistrict1 sidewalk
+  JOIN
+    arnold.segment_test_line road
+  ON
+    ST_Intersects(ST_Buffer(sidewalk.geom, 2), ST_Buffer(road.geom, 15))
+  WHERE
+    	(ABS(DEGREES(ST_Angle(road.geom, sidewalk.geom))) BETWEEN 0 AND 10
+    	OR ABS(DEGREES(ST_Angle(road.geom, sidewalk.geom))) BETWEEN 170 AND 190
+    	OR ABS(DEGREES(ST_Angle(road.geom, sidewalk.geom))) BETWEEN 330 AND 360)
+    AND ( ST_length(sidewalk.geom) > 9 )
+)
+SELECT
+  sidewalk_id,
+  sidewalk_geom,
+  road_geom,
+  angle_degrees,
+  start_start_distance,
+  end_end_distance,
+  start_end_distance,
+  end_start_distance,
+  midpoints_distance,
+  sidewalk_length
+FROM
+  ranked_roads
+WHERE
+  rank = 1;
+
+  
    
