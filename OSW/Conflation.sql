@@ -105,23 +105,21 @@ SELECT DISTINCT sidewalk.geom, road.geom, ABS(DEGREES( ST_Angle(road.geom, sidew
 FROM osm_sidewalk_udistrict1 sidewalk
 JOIN conflation.segment_test_line road
 ON ST_Intersects(ST_Buffer(sidewalk.geom, 2), ST_Buffer(road.geom, 15))
-WHERE ( ABS(DEGREES( ST_Angle(road.geom, sidewalk.geom) )) BETWEEN 0 AND 30
-  		OR ABS(DEGREES( ST_Angle(road.geom, sidewalk.geom) )) BETWEEN 165 AND 195
-  		OR ABS(DEGREES( ST_Angle(road.geom, sidewalk.geom) )) BETWEEN 330 AND 360  ) -- sp-sp, ep-ep < 30
+WHERE ( ABS(DEGREES( ST_Angle(road.geom, sidewalk.geom) )) BETWEEN 0 AND 45 -- PARALLEL 
+  		OR ABS(DEGREES( ST_gle(road.geom, sidewalk.geom) )) BETWEEN 160 AND 200
+  		OR ABS(DEGREES( ST_Angle(road.geom, sidewalk.geom) )) BETWEEN 320 AND 360  )
   AND ( 
-        (ST_Distance(ST_StartPoint(road.geom), ST_StartPoint(sidewalk.geom)) < 45 AND ST_Distance(ST_EndPoint(road.geom), ST_EndPoint(sidewalk.geom)) < 45)
-        OR (ST_Distance(ST_StartPoint(road.geom), ST_StartPoint(sidewalk.geom)) < 45 AND ST_Distance(ST_StartPoint(road.geom), ST_EndPoint(sidewalk.geom)) < 45)
-        OR (ST_Distance(ST_StartPoint(road.geom), ST_StartPoint(sidewalk.geom)) < 45 AND ST_Distance(ST_EndPoint(road.geom), ST_StartPoint(sidewalk.geom)) < 45)
-        OR (ST_Distance(ST_EndPoint(road.geom), ST_EndPoint(sidewalk.geom)) < 45 AND ST_Distance(ST_StartPoint(road.geom), ST_EndPoint(sidewalk.geom)) < 45)
-        OR (ST_Distance(ST_EndPoint(road.geom), ST_EndPoint(sidewalk.geom)) < 45 AND ST_Distance(ST_StartPoint(road.geom), ST_StartPoint(sidewalk.geom)) < 45)
-        OR (ST_Distance(ST_EndPoint(road.geom), ST_EndPoint(sidewalk.geom)) < 45 AND ST_Distance(ST_EndPoint(road.geom), ST_StartPoint(sidewalk.geom)) < 45)
-        OR (ST_Distance(ST_StartPoint(road.geom), ST_EndPoint(sidewalk.geom)) < 45 AND ST_Distance(ST_StartPoint(road.geom), ST_StartPoint(sidewalk.geom)) < 45)
-        OR (ST_Distance(ST_StartPoint(road.geom), ST_EndPoint(sidewalk.geom)) < 45 AND ST_Distance(ST_EndPoint(road.geom), ST_EndPoint(sidewalk.geom)) < 45)
+  		ST_length(sidewalk.geom) < 10  --
+
+  		OR (
+	  		   (ST_Distance(ST_StartPoint(road.geom), ST_StartPoint(sidewalk.geom)) < 45 AND ST_Distance(ST_EndPoint(road.geom), ST_EndPoint(sidewalk.geom)) < 45)
+	        OR (ST_Distance(ST_StartPoint(road.geom), ST_StartPoint(sidewalk.geom)) < 45 AND ST_Distance(ST_StartPoint(road.geom), ST_EndPoint(sidewalk.geom)) < 45)
+	        OR (ST_Distance(ST_StartPoint(road.geom), ST_StartPoint(sidewalk.geom)) < 45 AND ST_Distance(ST_EndPoint(road.geom), ST_StartPoint(sidewalk.geom)) < 45)
+	        OR (ST_Distance(ST_EndPoint(road.geom), ST_EndPoint(sidewalk.geom)) < 45 AND ST_Distance(ST_StartPoint(road.geom), ST_EndPoint(sidewalk.geom)) < 45)
+	        OR (ST_Distance(ST_EndPoint(road.geom), ST_EndPoint(sidewalk.geom)) < 45 AND ST_Distance(ST_StartPoint(road.geom), ST_StartPoint(sidewalk.geom)) < 45)
+	        OR (ST_Distance(ST_EndPoint(road.geom), ST_EndPoint(sidewalk.geom)) < 45 AND ST_Distance(ST_EndPoint(road.geom), ST_StartPoint(sidewalk.geom)) < 45)
+	        OR (ST_Distance(ST_StartPoint(road.geom), ST_EndPoint(sidewalk.geom)) < 45 AND ST_Distance(ST_StartPoint(road.geom), ST_StartPoint(sidewalk.geom)) < 45)
+	        OR (ST_Distance(ST_StartPoint(road.geom), ST_EndPoint(sidewalk.geom)) < 45 AND ST_Distance(ST_EndPoint(road.geom), ST_EndPoint(sidewalk.geom)) < 45)
+
+  		)
     );
-
-select DISTINCT sidewalk.way
-from osm_sidewalk_udistrict1 sidewalk
-JOIN conflation.segment_test_line road
-on ST_Intersects(sidewalk.way, ST_Buffer(road.geom, 30))
-WHERE ST_Within(sidewalk.way, ST_Buffer(road.geom, 30));
-
