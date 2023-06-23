@@ -51,7 +51,7 @@ ORDER BY objectid, routeid);
 	-- Finally, it splits the geometries in a.geom using the collected intersection geometries (ST_Split(a.geom, ST_collect(b.geom))). The result is a set of individual linestrings obtained by splitting the original geometries.
 	-- The resulting linestrings are grouped by object ID, route ID, and original geometry (a.objectid, a.routeid, a.geom) and inserted into the arnold.segment_test table.
 -- Date: 20230622
-CREATE TABLE conflation.segment_test AS
+CREATE TABLE arnold.segment_test AS
 WITH intersection_points AS ( --
   SELECT DISTINCT m1.objectid oi1, m1.routeid ri1, ST_Intersection(m1.geom, m2.geom) AS geom
   FROM arnold.wapr_udistrict1 m1
@@ -69,12 +69,12 @@ GROUP BY
   a.geom;
 
 -- create a table that pull the data from the segment_test table, convert it into linestring instead leaving it as a collection
-CREATE TABLE conflation.segment_test_line AS
+CREATE TABLE arnold.segment_test_line AS
 SELECT objectid, routeid, (ST_Dump(st_split)).geom::geometry(LineString, 3857) AS geom
-FROM conflation.segment_test;
+FROM arnold.segment_test;
 
 -- Create a geom index for segment_test_line and osm_sidewalk_udistrict1
-CREATE INDEX segment_test_line_geom ON conflation.segment_test_line USING GIST (geom)
+CREATE INDEX segment_test_line_geom ON arnold.segment_test_line USING GIST (geom)
 CREATE INDEX osm_sidewalk_udistrict1_geom ON osm_sidewalk_udistrict1 USING GIST (geom)
 
 --------- STEP 2: identify matching criteria ---------
@@ -89,12 +89,14 @@ SELECT sidewalk.*
 FROM osm_sidewalk_udistrict1 sidewalk
 
 SELECT *
-FROM conflation.segment_test_line
+FROM arnold.segment_test_line
 
 -- This code will join the segments with the roads that are:
 -- 1. the road buffer and the sidewalk buffer overlap
 -- 2. the road and the sidewalk are parallel to each other (between 0-30 or 165/195 or 330-360 degree)
 -- 3. the start and end point of the sidewalk should be satisfy at least 2 (spsp/epep/mpmp/spep/epsp) TODO
+
+l
 SELECT DISTINCT sidewalk.geom, road.geom, ABS(DEGREES( ST_Angle(road.geom, sidewalk.geom) )),
 				ST_Distance(ST_StartPoint(road.geom), ST_StartPoint(sidewalk.geom)),
 				ST_Distance(ST_EndPoint(road.geom), ST_EndPoint(sidewalk.geom)),
@@ -103,7 +105,7 @@ SELECT DISTINCT sidewalk.geom, road.geom, ABS(DEGREES( ST_Angle(road.geom, sidew
 				ST_Distance(ST_LineInterpolatePoint(road.geom, 0.5), ST_LineInterpolatePoint(sidewalk.geom, 0.5)),
 				ST_length(sidewalk.geom)
 FROM osm_sidewalk_udistrict1 sidewalk
-JOIN conflation.segment_test_line road
+JOIN arnold.segment_test_line road
 ON ST_Intersects(ST_Buffer(sidewalk.geom, 2), ST_Buffer(road.geom, 15))
 WHERE ( ABS(DEGREES( ST_Angle(road.geom, sidewalk.geom) )) BETWEEN 0 AND 45 -- PARALLEL 
   		OR ABS(DEGREES( ST_Angle(road.geom, sidewalk.geom) )) BETWEEN 160 AND 200
@@ -123,8 +125,7 @@ WHERE ( ABS(DEGREES( ST_Angle(road.geom, sidewalk.geom) )) BETWEEN 0 AND 45 -- P
 
   		)
     );
-    
-   SELECT * FROM osm_sidewalk_udistrict1 sidewalk
+  
    
    
    
