@@ -109,7 +109,7 @@ WHERE ( ABS(DEGREES( ST_Angle(road.geom, sidewalk.geom) )) BETWEEN 0 AND 45 -- P
   		OR ABS(DEGREES( ST_Angle(road.geom, sidewalk.geom) )) BETWEEN 160 AND 200
   		OR ABS(DEGREES( ST_Angle(road.geom, sidewalk.geom) )) BETWEEN 320 AND 360  )
   AND ( 
-  		ST_length(sidewalk.geom) < 10  --
+  		ST_length(sidewalk.geom) < 10   --
 
   		OR (
 	  		   (ST_Distance(ST_StartPoint(road.geom), ST_StartPoint(sidewalk.geom)) < 45 AND ST_Distance(ST_EndPoint(road.geom), ST_EndPoint(sidewalk.geom)) < 45)
@@ -123,3 +123,8 @@ WHERE ( ABS(DEGREES( ST_Angle(road.geom, sidewalk.geom) )) BETWEEN 0 AND 45 -- P
 
   		)
     );
+    
+   SELECT * FROM osm_sidewalk_udistrict1 sidewalk
+   
+   
+   

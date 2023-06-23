@@ -28,30 +28,6 @@ INSERT INTO arnold.wapr_linestring (shapelength_line)
 select ST_length(geom)
 from wapr_linestring;
 
-select shape_length, shapelength_line
-from wapr_linestring;
-
-
--- Step 1: Create a new table with the desired geometry type
-CREATE TABLE arnold.wapr_new (
-  objectid SERIAL PRIMARY KEY,
-  routeid VARCHAR(75),
-  beginmeasure FLOAT8,
-  endmeasure FLOAT8,
-  shape_length FLOAT8,
-  geom geometry(linestring, 3857)
-);
-
--- Step 2: Convert the MultiLineString geometries into LineString geometries
-INSERT INTO arnold.wapr_new (routeid, beginmeasure, endmeasure, shape_length, geom)
-SELECT routeid, beginmeasure, endmeasure, ST_Length((ST_Dump(ST_LineMerge(shape))).geom::geometry(linestring, 3857)), (ST_Dump(ST_LineMerge(shape))).geom::geometry(linestring, 3857)
-FROM arnold.wapr_hpms_submittal;
-
-select count(*)
-from arnold.wapr_new -- 159618
-
-select count(distinct routeid)
-from arnold.wapr_new -- 159207
 
 select count(*)
 from arnold.wapr_linestring  -- 159732
@@ -72,13 +48,6 @@ where st_astext(shape) ilike '%multilinestring%' -- 159434
 select count(*) 
 from arnold.wapr_hpms_submittal
 where st_astext(shape) ilike '%multilinestring%' -- 159434
-
-select wn.routeid, whs.routeid, wn.shape_length, whs.shape_length, wn.geom--, whs.shape 
-from arnold.wapr_new wn
-join arnold.wapr_hpms_submittal whs
-on wn.routeid = whs.routeid
-where st_astext(whs.shape) ilike '%multilinestring%' 
-order by wn.routeid
 
 -- check duplicate
 select geom, count(*)
