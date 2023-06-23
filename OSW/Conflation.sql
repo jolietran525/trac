@@ -106,7 +106,7 @@ FROM osm_sidewalk_udistrict1 sidewalk
 JOIN conflation.segment_test_line road
 ON ST_Intersects(ST_Buffer(sidewalk.geom, 2), ST_Buffer(road.geom, 15))
 WHERE ( ABS(DEGREES( ST_Angle(road.geom, sidewalk.geom) )) BETWEEN 0 AND 45 -- PARALLEL 
-  		OR ABS(DEGREES( ST_gle(road.geom, sidewalk.geom) )) BETWEEN 160 AND 200
+  		OR ABS(DEGREES( ST_Angle(road.geom, sidewalk.geom) )) BETWEEN 160 AND 200
   		OR ABS(DEGREES( ST_Angle(road.geom, sidewalk.geom) )) BETWEEN 320 AND 360  )
   AND ( 
   		ST_length(sidewalk.geom) < 10  --
