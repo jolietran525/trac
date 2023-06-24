@@ -94,22 +94,10 @@ FROM arnold.segment_test_line
 -- This code will join the segments with the roads that are:
 -- 1. the road buffer and the sidewalk buffer overlap
 -- 2. the road and the sidewalk are parallel to each other (between 0-30 or 165/195 or 330-360 degree)
--- 3. the start and end point of the sidewalk should be satisfy at least 2 (spsp/epep/mpmp/spep/epsp) TODO
+-- 3. in case where the sidewalk.geom looking at more than 2 road.geom at the same time, we need to choose the one that have the closest distance
+--    from the midpoint of the sidewalk to the midpoint of the road
 
--- DISCARD THIS CODE
-SELECT DISTINCT sidewalk.osm_id
-FROM osm_sidewalk_udistrict1 sidewalk
-JOIN arnold.segment_test_line road
-ON ST_Intersects(ST_Buffer(sidewalk.geom, 2), ST_Buffer(road.geom, 15)) -- need TO MODIFY so so we have better number
-WHERE ( ABS(DEGREES( ST_Angle(road.geom, sidewalk.geom) )) BETWEEN 0 AND 10 -- 0 
-  		OR ABS(DEGREES( ST_Angle(road.geom, sidewalk.geom) )) BETWEEN 170 AND 190 --180
-  		OR ABS(DEGREES( ST_Angle(road.geom, sidewalk.geom) )) BETWEEN 330 AND 360  ) --360
-  AND ( 
-  		ST_length(sidewalk.geom) > 9 ); -- IS this a good number?? how DO we decide??
-  
- 
- -- USE THIS
- WITH ranked_roads AS (
+WITH ranked_roads AS (
   SELECT
     sidewalk.osm_id AS sidewalk_id,
   	sidewalk.geom AS sidewalk_geom,
@@ -121,18 +109,19 @@ WHERE ( ABS(DEGREES( ST_Angle(road.geom, sidewalk.geom) )) BETWEEN 0 AND 10 -- 0
     ST_Distance(ST_EndPoint(road.geom), ST_StartPoint(sidewalk.geom)) AS end_start_distance,
     ST_Distance(ST_LineInterpolatePoint(road.geom, 0.5), ST_LineInterpolatePoint(sidewalk.geom, 0.5)) AS midpoints_distance,
     ST_length(sidewalk.geom) AS sidewalk_length,
-    ROW_NUMBER() OVER (PARTITION BY sidewalk.geom ORDER BY ST_Distance(ST_LineInterpolatePoint(road.geom, 0.5), ST_LineInterpolatePoint(sidewalk.geom, 0.5)) ) AS rank
+    -- rank this based on the distance of the midpoint of the sidewalk to the midpoint of the road
+    ROW_NUMBER() OVER (PARTITION BY sidewalk.geom ORDER BY ST_Distance(ST_LineInterpolatePoint(road.geom, 0.5), ST_LineInterpolatePoint(sidewalk.geom, 0.5)) ) AS RANK
   FROM
     osm_sidewalk_udistrict1 sidewalk
   JOIN
     arnold.segment_test_line road
   ON
-    ST_Intersects(ST_Buffer(sidewalk.geom, 2), ST_Buffer(road.geom, 15))
+    ST_Intersects(ST_Buffer(sidewalk.geom, 2), ST_Buffer(road.geom, 15))  -- need TO MODIFY so so we have better number, what IF there 
   WHERE
-    	(ABS(DEGREES(ST_Angle(road.geom, sidewalk.geom))) BETWEEN 0 AND 10
-    	OR ABS(DEGREES(ST_Angle(road.geom, sidewalk.geom))) BETWEEN 170 AND 190
-    	OR ABS(DEGREES(ST_Angle(road.geom, sidewalk.geom))) BETWEEN 330 AND 360)
-    AND ( ST_length(sidewalk.geom) > 9 )
+    	(ABS(DEGREES(ST_Angle(road.geom, sidewalk.geom))) BETWEEN 0 AND 10 -- 0 
+    	OR ABS(DEGREES(ST_Angle(road.geom, sidewalk.geom))) BETWEEN 170 AND 190 -- 180
+    	OR ABS(DEGREES(ST_Angle(road.geom, sidewalk.geom))) BETWEEN 330 AND 360) -- 360
+    -- AND ( ST_length(sidewalk.geom) > 9 ) -- IGNORE sidewalk that ARE shorter than 9 meters
 )
 SELECT
   sidewalk_id,
@@ -150,5 +139,4 @@ FROM
 WHERE
   rank = 1;
 
-  
-   
+-- next step: how to work around with those that serve as a "connecting" between this centerline of the sidewalk to another centerline of the sidewalk?
