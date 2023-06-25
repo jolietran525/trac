@@ -19,6 +19,8 @@ CREATE table osm_sidewalk_udistrict1 AS (-- ONLY footway = sidewalk
 
 ALTER TABLE osm_sidewalk_udistrict1 RENAME COLUMN way TO geom;
 
+
+
 -- points in u-district
 CREATE table osm_point_udistrict1 AS (
 	SELECT *
@@ -28,19 +30,27 @@ CREATE table osm_point_udistrict1 AS (
 
 ALTER TABLE osm_point_udistrict1 RENAME COLUMN way TO geom;
 
-
--- kerb points in u-district
-CREATE TABLE osm_kerb_udistrict1 AS (
+-- crossing in u-district
+CREATE TABLE osm_crossing_udistrict1 AS (
 	SELECT *
-	FROM planet_osm_point
-	WHERE (
-			barrier = 'kerb' OR
-			tags -> 'kerb' IS NOT NULL ) AND 
-			way && st_setsrid( st_makebox2d( st_makepoint(-13616401,6049782), st_makepoint(-13615688,6050649)), 3857) );
+	FROM planet_osm_line
+	WHERE   highway = 'footway' AND 
+			tags -> 'footway' = 'crossing' AND 
+			way && st_setsrid( st_makebox2d( st_makepoint(-13616323, 6049894), st_makepoint(-13615733, 6050671) ), 3857) );
 
-ALTER TABLE osm_kerb_udistrict1 RENAME COLUMN way TO geom;
+ALTER TABLE osm_crossing_udistrict1 RENAME COLUMN way TO geom;
 
 
+-- only highway = footway null
+CREATE TABLE osm_footway_null_udistrict1 AS (-- ONLY highway = footway, footway IS NULL
+	SELECT *
+	FROM planet_osm_line
+	WHERE 	highway = 'footway' AND 
+			tags -> 'footway' IS NULL AND
+			way && st_setsrid( st_makebox2d( st_makepoint(-13616323, 6049894), st_makepoint(-13615733, 6050671) ), 3857)  );
+		
+ALTER TABLE osm_footway_null_udistrict1 RENAME COLUMN way TO geom;
+	
 
 --------- ARNOLD in u-district ----------
 CREATE TABLE  arnold.wapr_udistrict AS (
@@ -101,11 +111,11 @@ CREATE INDEX osm_sidewalk_udistrict1_geom ON osm_sidewalk_udistrict1 USING GIST 
 -- 2. intersection with buffer of the road segment
 -- 3. parallel
 
--- check point: how many sidewalks are there
+-- check point 2.1: how many sidewalks are there
 SELECT sidewalk.*
 FROM osm_sidewalk_udistrict1 sidewalk; -- there ARE 107 sidewalks
 
--- check point: how many road segments are there
+-- check point 2.2: how many road segments are there
 SELECT *
 FROM arnold.segment_test_line;
 
@@ -161,7 +171,7 @@ CREATE TABLE conflation.long_parallel AS
 
 
 -------------- STEP 3: How to deal with the rest of the sidewalk segments? --------------
--- check point: how many sidewalk segments left
+-- check point 3.1: how many sidewalk segments left
 SELECT *
 FROM osm_sidewalk_udistrict1 sidewalk
 WHERE sidewalk.geom NOT IN (
@@ -196,7 +206,7 @@ INSERT INTO conflation.conflation_test1 (osm_id, LABEL, tags, st1_routeid, st2_r
 		SELECT lp.sidewalk_geom
 		FROM conflation.long_parallel lp) AND (centerline1.road_routeid <> centerline2.road_routeid)
 
--- check point: points that intersect with the sidewalk, but sidewalk not in the conflation table
+-- check point 3.2: points that intersect with the sidewalk, but sidewalk not in the conflation table
 SELECT point.barrier, point.tags AS point_tag, sw.tags AS sw_tags, point.geom, sw.geom
 FROM osm_point_udistrict1 point
 JOIN (	
@@ -207,7 +217,7 @@ JOIN (
 	FROM conflation.conflation_test1 ) ) AS sw
 ON ST_intersects(sw.geom, point.geom)
 
--- check point: points that intersect with the sidewalk and sidewalk in the conflation table
+-- check point 3.3: points that intersect with the sidewalk and sidewalk in the conflation table
 SELECT point.barrier, point.tags AS point_tag, sw.tags AS sw_tags, point.geom, sw.geom
 FROM osm_point_udistrict1 point
 JOIN (	
@@ -219,7 +229,7 @@ JOIN (
 ON ST_intersects(sw.geom, point.geom)
 
 
--- check point: points that intersect with the sidewalk, regardless if sidewalk is in the conflation or not
+-- check point 3.4: points that intersect with the sidewalk, regardless if sidewalk is in the conflation or not
 SELECT point.barrier, point.tags AS point_tag, sw.tags AS sw_tags, point.geom, sw.geom
 FROM osm_point_udistrict1 point
 JOIN (	
@@ -232,7 +242,7 @@ ON ST_intersects(sw.geom, point.geom)
 -- we are going to throw it in the conflation table, and it will not associate with any street(?)
 -- TODO: confirm, do we need to associate entrance with streets?
 INSERT INTO conflation.conflation_test1 (osm_id, LABEL, tags, osm_geom)
-	SELECT point.osm_id, 'entrance' AS LABEL, point.tags AS tags, sw.geom AS osm_geom
+	SELECT sw.osm_id, 'entrance' AS LABEL, point.tags AS tags, sw.geom AS osm_geom
 	FROM osm_sidewalk_udistrict1 sw
 	JOIN (
 		SELECT *
@@ -242,29 +252,95 @@ INSERT INTO conflation.conflation_test1 (osm_id, LABEL, tags, osm_geom)
 		) AS point 
 		ON ST_intersects(sw.geom, point.geom)
 
--- check point: what do we have in conflation table after inputting sidewalk, entrance, corner?
+		
+-- check point 3.4: what do we have in conflation table after inputting sidewalk, entrance, corner?
 SELECT *
 FROM conflation.conflation_test1 ct -- 87 OUT OF 107 sidewalk segments! (81%)
 
-	
----- STEP 3.4:
--- TODO: how do we handle those segments that are kerb?
-	-- figure out if the kerb leads to 1 or 2 streets?
-	-- possible solution: if this kerb point buffer and intersect with another kerb point, there are 2 kerbs
-SELECT point.osm_id, point.tags AS tags, point.geom AS point_geom, sw.geom AS sw_geom
-FROM osm_sidewalk_udistrict1 sw
+-- check point: how crossing and sidewalk are connected?
+SELECT crossing.tags AS crossing, sidewalk.tags AS sidewalk, crossing.geom AS cross_geom, sidewalk.geom AS sidewalk_geom
+FROM osm_crossing_udistrict1 crossing
+JOIN osm_sidewalk_udistrict1 sidewalk
+ON ST_Intersects(sidewalk.geom, crossing.geom);
+
+
+-- check point: how highway=footway and crossing are connected?
+SELECT crossing.tags AS crossing, footway.tags AS footway, crossing.geom AS cross_geom, footway.geom AS footway_geom
+FROM osm_footway_null_udistrict1 footway
+JOIN osm_crossing_udistrict1 crossing
+ON ST_Intersects(footway.geom, crossing.geom);
+
+-- check point: how highway=footway and crossing and sidewalk are connected?
+SELECT joined_crossing.crossing_tags AS crossing_tags, joined_crossing.footway_tags AS footway_tags, sidewalk.tags AS sidewalk, joined_crossing.cross_geom AS cross_geom, joined_crossing.footway_geom AS footway_geom,sidewalk.geom AS sidewalk_geom
+FROM osm_sidewalk_udistrict1 sidewalk
+JOIN (SELECT crossing.tags AS crossing_tags, footway.tags AS footway_tags, crossing.geom AS cross_geom, footway.geom AS footway_geom
+		FROM osm_footway_null_udistrict1 footway
+		JOIN osm_crossing_udistrict1 crossing
+		ON ST_Intersects(footway.geom, crossing.geom)) AS joined_crossing
+ON ST_Intersects(sidewalk.geom, joined_crossing.footway_geom) OR ST_Intersects(sidewalk.geom, joined_crossing.cross_geom)
+
+-- check point: what is sidewalk intersecting?
+SELECT footway.tags AS footway, sidewalk.geom AS sidewalk_geom, footway.geom AS footway_geom
+FROM osm_sidewalk_udistrict1 sidewalk
 JOIN (
-	SELECT *
-	FROM osm_point_udistrict1 
-	WHERE tags -> 'kerb' IS NOT NULL 
-	OR barrier = 'kerb' 
-	) 	AS point 
-ON ST_intersects(sw.geom, point.geom)
-WHERE sw.geom NOT IN (
+	SELECT tags, way AS geom
+	FROM planet_osm_line
+	WHERE 	highway = 'footway' AND 
+			(tags -> 'footway' IS NULL OR
+			tags -> 'footway' !=  'sidewalk' ) AND
+			way && st_setsrid( st_makebox2d( st_makepoint(-13616323, 6049894), st_makepoint(-13615733, 6050671) ), 3857) ) AS footway
+ON ST_Intersects(footway.geom, sidewalk.geom);
+ 
+
+
+---- STEP 3.4: How to handle the rest of the sidewalk segments
+-- Solution: first, conflate the crossing edge.
+
+-- check point: see how many crossing are there 
+SELECT DISTINCT crossing.osm_id, crossing.geom
+FROM osm_crossing_udistrict1 crossing -- 60
+
+INSERT INTO conflation.conflation_test1 (osm_id, LABEL, tags, st1_routeid, osm_geom)
+	SELECT crossing.osm_id AS osm_id, 'crossing' AS LABEL, crossing.tags AS tags, road.routeid AS st1_routeid, crossing.geom AS osm_geom 
+	FROM osm_crossing_udistrict1 crossing
+	JOIN arnold.segment_test_line road ON ST_Intersects(crossing.geom, road.geom)
+-- note, there is one special case that is not joined in this table cuz it is not intersecting with any roads: osm_id 929628172
+
+-- check point: where sidewalk intersects crossing and sidewalk not in conflation table
+SELECT crossing.osm_id AS osm_id, crossing.tags AS cross_tags, sw.tags AS sw_tags, sw.geom AS sw_geom, crossing.geom AS cross_geom
+	FROM osm_crossing_udistrict1 crossing
+	JOIN osm_sidewalk_udistrict1 sw ON ST_Intersects(crossing.geom, sw.geom)
+	JOIN conflation.conflation_test1 sw_conf ON ST_Intersects(sw_conf.osm_geom, crossing.geom)
+	WHERE sw.geom NOT IN 
+	(
 	SELECT osm_geom
 	FROM conflation.conflation_test1 )
 
 
+	
+	
+-- finding links by perform st_intersects between the osm_sidewalk_udistrict1 with the crossing in the conflation table
+SELECT DISTINCT sw.osm_id, 'crossing link' AS label, sw.tags, sw.geom, crossing.osm_geom
+FROM osm_sidewalk_udistrict1 sw
+JOIN conflation.conflation_test1 crossing
+ON ST_Intersects(crossing.osm_geom, sw.geom)
+WHERE   crossing.LABEL = 'crossing' AND
+		sw.geom NOT IN (
+						SELECT osm_geom
+						FROM conflation.conflation_test1 ) AND
+		ST_Length(sw.geom) < 10 -- leaving the two special cases OUT: osm_id = 490774566, 475987407
+
+	
+-- next, finding links by perform st_intersects between the osm_footway_null_udistrict1 with the crossing in the conflation table
+--check point: see where crossing intersect with footway = null
+SELECT footway_null.tags, footway_null.geom, crossing.osm_geom
+FROM osm_footway_null_udistrict1 footway_null
+JOIN conflation.conflation_test1 crossing
+ON ST_Intersects(crossing.osm_geom, footway_null.geom)
+WHERE crossing.LABEL = 'crossing'
+-- not using this right now
+	
+	
 -- TODO: Confirm, what information do we need in a conflation table
 -- TODO: revise the conflation table schema
 -- TODO: Design a permanent id to refer
