@@ -168,7 +168,6 @@ WHERE sidewalk.geom NOT IN (
 	SELECT lp.sidewalk_geom
 	FROM conflation.long_parallel lp); --34
 	-- TODO: weird case: 490774566
-
 	
 ---- STEP 3.1: CREATE conflation table
 CREATE TABLE conflation.conflation_test1 (
@@ -197,7 +196,7 @@ INSERT INTO conflation.conflation_test1 (osm_id, LABEL, tags, st1_routeid, st2_r
 		SELECT lp.sidewalk_geom
 		FROM conflation.long_parallel lp) AND (centerline1.road_routeid <> centerline2.road_routeid)
 
--- check point: points that intersect with the sidewalk, but not in the conflation table
+-- check point: points that intersect with the sidewalk, but sidewalk not in the conflation table
 SELECT point.barrier, point.tags AS point_tag, sw.tags AS sw_tags, point.geom, sw.geom
 FROM osm_point_udistrict1 point
 JOIN (	
@@ -206,6 +205,26 @@ JOIN (
 	WHERE sidewalk.geom NOT IN (
 	SELECT osm_geom
 	FROM conflation.conflation_test1 ) ) AS sw
+ON ST_intersects(sw.geom, point.geom)
+
+-- check point: points that intersect with the sidewalk and sidewalk in the conflation table
+SELECT point.barrier, point.tags AS point_tag, sw.tags AS sw_tags, point.geom, sw.geom
+FROM osm_point_udistrict1 point
+JOIN (	
+	SELECT *
+	FROM osm_sidewalk_udistrict1 sidewalk
+	WHERE sidewalk.geom IN (
+	SELECT osm_geom
+	FROM conflation.conflation_test1 ) ) AS sw
+ON ST_intersects(sw.geom, point.geom)
+
+
+-- check point: points that intersect with the sidewalk, regardless if sidewalk is in the conflation or not
+SELECT point.barrier, point.tags AS point_tag, sw.tags AS sw_tags, point.geom, sw.geom
+FROM osm_point_udistrict1 point
+JOIN (	
+	SELECT *
+	FROM osm_sidewalk_udistrict1 sidewalk ) AS sw
 ON ST_intersects(sw.geom, point.geom)
 
 
@@ -249,6 +268,7 @@ WHERE sw.geom NOT IN (
 -- TODO: Confirm, what information do we need in a conflation table
 -- TODO: revise the conflation table schema
 -- TODO: Design a permanent id to refer
+
 	
 
 -- LIMITATION: defined number and buffer cannot accurately represent all the sidewalk scenarios
