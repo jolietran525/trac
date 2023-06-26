@@ -3,9 +3,9 @@ select count(distinct routeid)
 from arnold.wapr_hpms_submittal
 
 -- since it is in multistringm format, we want to convert to linestring
--- Step 1: Create a new table with the desired geometry type
 CREATE TABLE arnold.wapr_linestring (
   objectid SERIAL PRIMARY KEY,
+  og_objectid INT8,
   routeid VARCHAR(75),
   beginmeasure FLOAT8,
   endmeasure FLOAT8,
@@ -14,20 +14,9 @@ CREATE TABLE arnold.wapr_linestring (
 );
 
 -- Step 2: Convert the MultiLineString geometries into LineString geometries
-INSERT INTO arnold.wapr_linestring (routeid, beginmeasure, endmeasure, shape_length, geom)
-SELECT routeid, beginmeasure, endmeasure, shape_length, ST_Force2D((ST_Dump(shape)).geom)::geometry(linestring, 3857)
+INSERT INTO arnold.wapr_linestring (og_objectid, routeid, beginmeasure, endmeasure, shape_length, geom)
+SELECT objectid, routeid, beginmeasure, endmeasure, shape_length, ST_Force2D((ST_Dump(shape)).geom)::geometry(linestring, 3857)
 FROM arnold.wapr_hpms_submittal;
-
-alter table arnold.wapr_linestring
-drop shapelength_line;
-
-alter table arnold.wapr_linestring
-add shapelength_line FLOAT8;
-
-INSERT INTO arnold.wapr_linestring (shapelength_line)
-select ST_length(geom)
-from wapr_linestring;
-
 
 select count(*)
 from arnold.wapr_linestring  -- 159732
