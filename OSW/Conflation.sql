@@ -44,14 +44,22 @@ CREATE TABLE jolie_ud1.osm_footway_null AS (
 			way && st_setsrid( st_makebox2d( st_makepoint(-13616323, 6049894), st_makepoint(-13615733, 6050671) ), 3857)  );
 		
 ALTER TABLE jolie_ud1.osm_footway_null RENAME COLUMN way TO geom;
-	
+
+CREATE TABLE jolie_ud1.osm_footway AS (
+	SELECT *
+	FROM planet_osm_line
+	WHERE 	highway = 'footway' AND
+			way && st_setsrid( st_makebox2d( st_makepoint(-13616323, 6049894), st_makepoint(-13615733, 6050671) ), 3857)  );
+
+ALTER TABLE jolie_ud1.osm_footway RENAME COLUMN way TO geom;
+
 
 --------- ARNOLD in u-district ----------
 CREATE TABLE jolie_ud1.arnold_roads AS (
 	SELECT *
 	FROM arnold.wapr_linestring 
 	WHERE geom && st_setsrid( st_makebox2d( st_makepoint(-13616323, 6049894), st_makepoint(-13615733, 6050671)), 3857)
-	ORDER BY objectid, routeid);
+	ORDER BY routeid, beginmeasure, endmeasure);
 
 
 --------------------------------------------
@@ -67,11 +75,11 @@ CREATE TABLE jolie_ud1.arnold_roads AS (
 	-- The resulting linestrings are grouped by object ID, route ID, and original geometry (a.objectid, a.routeid, a.geom) and inserted into the jolie_ud1.arnold_segments_collection table.
 CREATE TABLE jolie_ud1.arnold_segments_collection AS
 	WITH intersection_points AS (
-	  SELECT DISTINCT m1.objectid objectid, m1.og_objectid og_objectid, m1.routeid routeid, ST_Intersection(m1.geom, m2.geom) AS geom
+	  SELECT DISTINCT m1.objectid objectid, m1.og_objectid og_objectid, m1.routeid routeid, m1.beginmeasure beginmeasure, m1.endmeasure endmeasure, ST_Intersection(m1.geom, m2.geom) AS geom
 	  FROM jolie_ud1.arnold_roads m1
 	  JOIN jolie_ud1.arnold_roads m2 ON ST_Intersects(m1.geom, m2.geom) AND m1.objectid <> m2.objectid )
 	SELECT
-	  a.objectid, a.og_objectid, a.routeid, ST_collect(b.geom), ST_Split(a.geom, ST_collect(b.geom))
+	  a.objectid, a.og_objectid, a.routeid, a.beginmeasure, a.endmeasure, ST_collect(b.geom), ST_Split(a.geom, ST_collect(b.geom))
 	FROM
 	  jolie_ud1.arnold_roads AS a
 	JOIN
@@ -80,12 +88,15 @@ CREATE TABLE jolie_ud1.arnold_segments_collection AS
 	  a.objectid,
 	  a.og_objectid,
 	  a.routeid,
+	  a.beginmeasure,
+	  a.endmeasure,
 	  a.geom;
 
 -- create a table that pull the data from the segment_test table, convert it into linestring instead leaving it as a collection
 CREATE TABLE jolie_ud1.arnold_segments_line AS
-	SELECT objectid, og_objectid, routeid, (ST_Dump(st_split)).geom::geometry(LineString, 3857) AS geom
-	FROM jolie_ud1.arnold_segments_collection;
+	SELECT objectid, og_objectid, routeid, beginmeasure, endmeasure, (ST_Dump(st_split)).geom::geometry(LineString, 3857) AS geom
+	FROM jolie_ud1.arnold_segments_collection
+	ORDER BY routeid, beginmeasure, endmeasure;
 
 -- Create a geom index
 CREATE INDEX segments_line_geom ON jolie_ud1.arnold_segments_line USING GIST (geom);
@@ -94,7 +105,7 @@ CREATE INDEX crossing_geom ON jolie_ud1.osm_crossing USING GIST (geom);
 CREATE INDEX point_geom ON jolie_ud1.osm_point USING GIST (geom);
 CREATE INDEX footway_null_geom ON jolie_ud1.osm_footway_null USING GIST (geom);
 
---------- STEP 2: identify matching criteria ---------
+--------- STEP 2: identify matching criteria between sidewalk and arnold ---------
 -- since the arnold and the OSM datasets don't have any common attributes or identifiers, and their content represents
 -- different aspects of the street network (sidewalk vs main roads), we are going to rely on the geomtry properties and
 -- spatial relationships to find potential matches. So, we want:
@@ -121,9 +132,9 @@ CREATE TABLE jolie_conflation.big_sw AS
 	WITH ranked_roads AS (
 	  SELECT
 	    sidewalk.osm_id AS osm_id,
-	    road.objectid AS arnold_segment_id,
-	    road.og_objectid AS arnold_id,
 	    road.routeid AS arnold_routeid,
+	    road.beginmeasure AS arnold_beginmeasure,
+	    road.endmeasure AS arnold_endmeasure,
 	  	sidewalk.geom AS osm_geom,
 	    road.geom AS arnold_geom,
 	    ABS(DEGREES(ST_Angle(road.geom, sidewalk.geom))) AS angle_degrees,
@@ -146,87 +157,168 @@ CREATE TABLE jolie_conflation.big_sw AS
 	)
 	SELECT
 	  osm_id,
-	  arnold_id,
 	  arnold_routeid,
+	  arnold_beginmeasure,
+	  arnold_endmeasure,
 	  osm_geom,
 	  arnold_geom
 	FROM
 	  ranked_roads
 	WHERE
 	  rank = 1;
-
-ALTER TABLE jolie_conflation.big_sw
-ADD CONSTRAINT big_sw_osm_id_pk PRIMARY KEY (osm_id);
 	 
 CREATE INDEX big_sw_sidwalk_geom ON jolie_conflation.big_sw USING GIST (osm_geom);
 CREATE INDEX big_sw_arnold_geom ON jolie_conflation.big_sw USING GIST (arnold_geom);
 
 
--------------- STEP 3: How to deal with the rest of the sidewalk segments? --------------
--- check point 3.1: how many sidewalk segments left
+-------------- STEP 3: How to deal with the rest of the footway = sidewalk segments? Possibilities are: edges, connecting link --------------
+-- check point 3.1: how many sidewalk segments left, there are edges and link 
 SELECT *
 FROM jolie_ud1.osm_sw sidewalk
 WHERE sidewalk.geom NOT IN (
 	SELECT big_sw.osm_geom
 	FROM jolie_conflation.big_sw big_sw); --34
 	-- TODO: weird case: 490774566
-
-SELECT *
-FROM jolie_conflation.big_sw
 	
 
----- STEP 3.1: CREATE sidewalk edges table
+---- STEP 3.1: Dealing with edges
+	-- assumption: edge will have it start and end point connectected to sidewalk. We will use the big_sw table to identify our sidewalk edges
 CREATE TABLE jolie_conflation.sw_edges (
-	osm_id INT8 PRIMARY KEY,
-	arnold_id1 INT8,
-	arnold_id2 INT8,
-	osm_geom GEOMETRY(LineString, 3857),
-	arnold_geom1 GEOMETRY(LineString, 3857),
-	arnold_geom2 GEOMETRY(LineString, 3857)
+	osm_id INT8,
+	arnold_routeid1 VARCHAR(75),
+	arnold_beginmeasure1 FLOAT8,
+	arnold_endmeasure1 FLOAT8,
+	arnold_routeid2 VARCHAR(75),
+	arnold_beginmeasure2 FLOAT8,
+	arnold_endmeasure2 FLOAT8,
+	osm_geom GEOMETRY(LineString, 3857)
 )
 
 
----- STEP 3.2: Handle the segments that are the corner connecting this centerline of the sidewalk to the other centerline of the sidewalk
-INSERT INTO jolie_conflation.sw_edges (osm_id, arnold_id1, arnold_id2, osm_geom, arnold_geom1, arnold_geom2)
-	SELECT edge.osm_id AS osm_id, centerline1.arnold_id AS arnold_id1, centerline2.arnold_id AS arnold_id2, edge.geom AS osm_geom, centerline1.arnold_geom AS arnold_geom1, centerline2.arnold_geom AS arnold_geom2
+INSERT INTO jolie_conflation.sw_edges (osm_id, arnold_routeid1, arnold_beginmeasure1, arnold_endmeasure1, arnold_routeid2, arnold_beginmeasure2, arnold_endmeasure2, osm_geom)
+	SELECT  edge.osm_id AS osm_id,
+			centerline1.arnold_routeid AS arnold_routeid1,
+			centerline1.arnold_beginmeasure AS arnold_beginmeasure1,
+			centerline1.arnold_endmeasure AS arnold_endmeasure1,
+			centerline2.arnold_routeid AS arnold_routeid2,
+			centerline2.arnold_beginmeasure AS arnold_beginmeasure2,
+			centerline2.arnold_endmeasure AS arnold_endmeasure2,
+			edge.geom AS osm_geom
 	FROM jolie_ud1.osm_sw edge
 	JOIN jolie_conflation.big_sw centerline1 ON st_intersects(st_startpoint(edge.geom), centerline1.osm_geom)
 	JOIN jolie_conflation.big_sw centerline2 ON st_intersects(st_endpoint(edge.geom), centerline2.osm_geom)
-	WHERE edge.geom NOT IN (
-		SELECT sw.osm_geom
-		FROM jolie_conflation.big_sw sw) AND (centerline1.osm_id <> centerline2.osm_id)
+	WHERE   edge.geom NOT IN (
+				SELECT sw.osm_geom
+				FROM jolie_conflation.big_sw sw)
+			AND ST_Equals(centerline1.osm_geom, centerline2.osm_geom) IS FALSE
+
+
+---- STEP 3.2: Dealing with entrances
+	-- assumption: entrances are small segments that intersect with the sidewalk on one end and intersect with a point that have a tag of entrance=* or wheelchair=*
 	
-CREATE TABLE junction_sw_edges (
-	)
+-- create an entrance table
+CREATE TABLE jolie_conflation.entrances AS
+	SELECT entrance.osm_id, sidewalk.osm_id AS sidewalk_id, entrance.geom AS osm_geom
+	FROM jolie_ud1.osm_point point
+	JOIN (	SELECT *
+			FROM jolie_ud1.osm_sw sidewalk
+			WHERE sidewalk.geom NOT IN (
+					SELECT osm_geom
+					FROM jolie_conflation.big_sw ) AND 
+				  sidewalk.geom NOT IN (
+					SELECT osm_geom
+					FROM jolie_conflation.sw_edges )  ) AS entrance
+	ON ST_intersects(entrance.geom, point.geom)
+	JOIN jolie_conflation.big_sw sidewalk ON ST_Intersects(entrance.geom, sidewalk.osm_geom)
+	WHERE point.tags -> 'entrance' IS NOT NULL 
+			OR point.tags -> 'wheelchair' IS NOT NULL
+			
 
--- check point 3.2: points that intersect with the sidewalk, but sidewalk not in the conflation table
-SELECT point.barrier, point.tags AS point_tag, sw.tags AS sw_tags, point.geom, sw.geom
-FROM jolie_ud1.osm_point point
-JOIN (	
-	SELECT *
-	FROM jolie_ud1.osm_sw sidewalk
-	WHERE sidewalk.geom NOT IN (
+---- STEP 3.3: Dealing with crossing
+	-- assumption: all of the crossing are referred to as footway=crossing
+
+-- check point: see how many crossing are there 
+SELECT DISTINCT crossing.osm_id, crossing.geom
+FROM jolie_ud1.osm_crossing crossing -- 60
+
+CREATE TABLE jolie_conflation.crossing (osm_id, arnold_routeid, arnold_beginmeasure, arnold_endmeasure, osm_geom)
+	SELECT crossing.osm_id AS osm_id, road.routeid AS arnold_routeid, road.beginmeasure AS arnold_beginmeasure, road.endmeasure arnold_endmeasure, crossing.geom AS osm_geom 
+	FROM jolie_ud1.osm_crossing crossing
+	JOIN jolie_ud1.arnold_segments_line road ON ST_Intersects(crossing.geom, road.geom)
+-- note, there is one special case that is not joined in this table cuz it is not intersecting with any roads: osm_id 929628172. This crossing segment has the access=no
+
+	
+---- STEP 3.4: Dealing with connecting link
+	-- assumption 1: a link connects the sidewalk to the crossing
+	-- assumption 2: OR a link connects the sidewalk esge to the crossing
+	-- note: a link might or might not have a footway='sidewalk' tag
+
+-- check point: where sidewalk intersects crossing and sidewalk not in conflation table
+WITH link_not_distinct AS (
+	SELECT crossing.osm_id AS cross_id, sw.geom AS link_geom, crossing.osm_geom AS cross_geom, sw.osm_id AS link_id
+	FROM jolie_conflation.crossing crossing
+	JOIN jolie_ud1.osm_sw sw ON ST_Intersects(crossing.osm_geom, sw.geom)
+	WHERE sw.geom NOT IN (
 			SELECT osm_geom
-			FROM jolie_conflation.big_sw ) AND 
-		  sidewalk.geom NOT IN (
-			SELECT osm_geom
-			FROM jolie_conflation.sw_edges )  ) AS sw
-ON ST_intersects(sw.geom, point.geom)
-WHERE point.tags -> 'entrance' IS NOT NULL 
-		OR point.tags -> 'wheelchair' IS NOT NULL
+			FROM jolie_conflation.big_sw ) AND
+		  ST_Length(sw.geom) < 10 -- leaving the two special cases OUT: osm_id = 490774566, 475987407
+	ORDER BY link_id )
+SELECT l1.link_id, l1.cross_id. l2.cross_id
+FROM link_not_distinct l1
+LEFT JOIN link_not_distinct l2
+ON l1.link_id = l2.link_id
 
--- check point 3.3: points that intersect with the sidewalk and sidewalk in the conflation table
-SELECT point.barrier, point.tags AS point_tag, sw.tags AS sw_tags, point.geom, sw.geom
-FROM jolie_ud1.osm_point point
-JOIN (	
-	SELECT *
-	FROM jolie_ud1.osm_sw sidewalk
-	WHERE sidewalk.geom IN (
-	SELECT osm_geom
-	FROM conflation.conflation_test1 ) ) AS sw
-ON ST_intersects(sw.geom, point.geom)
+-- link id and connect to cross_ids. Need to modify it tmr!!
+WITH link_not_distinct AS (
+    SELECT
+        link_id,
+        cross_id,
+        ROW_NUMBER() OVER (PARTITION BY link_id ORDER BY cross_id) AS rn
+    FROM
+        (
+            SELECT
+                crossing.osm_id AS cross_id,
+                sw.geom AS link_geom,
+                crossing.osm_geom AS cross_geom,
+                sw.osm_id AS link_id
+            FROM
+                jolie_conflation.crossing crossing
+            JOIN
+                jolie_ud1.osm_sw sw ON ST_Intersects(crossing.osm_geom, sw.geom)
+            WHERE
+                sw.geom NOT IN (
+                    SELECT
+                        osm_geom
+                    FROM
+                        jolie_conflation.big_sw
+                )
+                AND ST_Length(sw.geom) < 10
+                AND crossing.osm_id NOT IN (490774566, 475987407)
+            ORDER BY
+                link_id
+        ) subquery
+)
+SELECT
+    link_id,
+    MAX(CASE WHEN rn = 1 THEN cross_id END) AS cross_id1,
+    MAX(CASE WHEN rn = 2 THEN cross_id END) AS cross_id2
+FROM
+    link_not_distinct
+GROUP BY
+    link_id;
 
 
+-- finding links by perform st_intersects between the jolie_ud1.osm_sw with the crossing in the conflation table
+SELECT sw.osm_id, sw.tags, sw.geom
+FROM jolie_ud1.osm_sw sw
+JOIN jolie_conflation.crossing crossing
+ON ST_Intersects(crossing.osm_geom, sw.geom)
+WHERE   sw.geom NOT IN (
+						SELECT osm_geom
+						FROM jolie_conflation.big_sw ) AND
+		ST_Length(sw.geom) < 10 -- leaving the two special cases OUT: osm_id = 490774566, 475987407
+
+			
 -- check point 3.4: points that intersect with the sidewalk, regardless if sidewalk is in the conflation or not
 SELECT point.barrier, point.tags AS point_tag, sw.tags AS sw_tags, point.geom, sw.geom
 FROM jolie_ud1.osm_point point
@@ -235,25 +327,6 @@ JOIN (
 	FROM jolie_ud1.osm_sw sidewalk ) AS sw
 ON ST_intersects(sw.geom, point.geom)
 
-
----- STEP 3.3: for those points that intersects with the sidewalk segments that not already in the table,
--- we are going to throw it in the conflation table, and it will not associate with any street(?)
--- TODO: confirm, do we need to associate entrance with streets?
-INSERT INTO conflation.conflation_test1 (osm_id, LABEL, tags, osm_geom)
-	SELECT sw.osm_id, point.tags AS tags, sw.geom AS osm_geom
-	FROM jolie_ud1.osm_sw sw
-	JOIN (
-		SELECT *
-		FROM jolie_ud1.osm_point 
-		WHERE tags -> 'entrance' IS NOT NULL 
-		OR tags -> 'wheelchair' IS NOT NULL 
-		) AS point 
-		ON ST_intersects(sw.geom, point.geom)
-
-		
--- check point 3.4: what do we have in conflation table after inputting sidewalk, entrance, corner?
-SELECT *
-FROM conflation.conflation_test1 ct -- 87 OUT OF 107 sidewalk segments! (81%)
 
 -- check point: how crossing and sidewalk are connected?
 SELECT crossing.tags AS crossing, sidewalk.tags AS sidewalk, crossing.geom AS cross_geom, sidewalk.geom AS osm_geom
@@ -271,14 +344,14 @@ ON ST_Intersects(footway.geom, crossing.geom);
 -- check point: how highway=footway and crossing and sidewalk are connected?
 SELECT joined_crossing.crossing_tags AS crossing_tags, joined_crossing.footway_tags AS footway_tags, sidewalk.tags AS sidewalk, joined_crossing.cross_geom AS cross_geom, joined_crossing.footway_geom AS footway_geom,sidewalk.geom AS osm_geom
 FROM jolie_ud1.osm_sw sidewalk
-JOIN (SELECT crossing.tags AS crossing_tags, footway.tags AS footway_tags, crossing.geom AS cross_geom, footway.geom AS footway_geom
+JOIN (  SELECT crossing.tags AS crossing_tags, footway.tags AS footway_tags, crossing.geom AS cross_geom, footway.geom AS footway_geom
 		FROM jolie_ud1.osm_footway_null footway
 		JOIN jolie_ud1.osm_crossing crossing
 		ON ST_Intersects(footway.geom, crossing.geom)) AS joined_crossing
 ON ST_Intersects(sidewalk.geom, joined_crossing.footway_geom) OR ST_Intersects(sidewalk.geom, joined_crossing.cross_geom)
 
 -- check point: what is sidewalk intersecting?
-SELECT footway.tags AS footway, sidewalk.geom AS osm_geom, footway.geom AS footway_geom
+SELECT DISTINCT footway.tags AS footway, sidewalk.geom AS osm_geom, footway.geom AS footway_geom
 FROM jolie_ud1.osm_sw sidewalk
 JOIN (
 	SELECT tags, way AS geom
@@ -287,56 +360,8 @@ JOIN (
 			(tags -> 'footway' IS NULL OR
 			tags -> 'footway' !=  'sidewalk' ) AND
 			way && st_setsrid( st_makebox2d( st_makepoint(-13616323, 6049894), st_makepoint(-13615733, 6050671) ), 3857) ) AS footway
-ON ST_Intersects(footway.geom, sidewalk.geom);
- 
+ON ST_Intersects(footway.geom, sidewalk.geom); 
 
-
----- STEP 3.4: How to handle the rest of the sidewalk segments
--- Solution: first, conflate the crossing edge.
-
--- check point: see how many crossing are there 
-SELECT DISTINCT crossing.osm_id, crossing.geom
-FROM jolie_ud1.osm_crossing crossing -- 60
-
-INSERT INTO conflation.conflation_test1 (osm_id, LABEL, tags, st1_routeid, osm_geom)
-	SELECT crossing.osm_id AS osm_id, 'crossing' AS LABEL, crossing.tags AS tags, road.routeid AS st1_routeid, crossing.geom AS osm_geom 
-	FROM jolie_ud1.osm_crossing crossing
-	JOIN jolie_ud1.arnold_segments_line road ON ST_Intersects(crossing.geom, road.geom)
--- note, there is one special case that is not joined in this table cuz it is not intersecting with any roads: osm_id 929628172
-
--- check point: where sidewalk intersects crossing and sidewalk not in conflation table
-SELECT crossing.osm_id AS osm_id, crossing.tags AS cross_tags, sw.tags AS sw_tags, sw.geom AS sw_geom, crossing.geom AS cross_geom
-	FROM jolie_ud1.osm_crossing crossing
-	JOIN jolie_ud1.osm_sw sw ON ST_Intersects(crossing.geom, sw.geom)
-	JOIN conflation.conflation_test1 sw_conf ON ST_Intersects(sw_conf.osm_geom, crossing.geom)
-	WHERE sw.geom NOT IN 
-	(
-	SELECT osm_geom
-	FROM conflation.conflation_test1 )
-
-
-	
-	
--- finding links by perform st_intersects between the jolie_ud1.osm_sw with the crossing in the conflation table
-SELECT DISTINCT sw.osm_id, 'crossing link' AS label, sw.tags, sw.geom, crossing.osm_geom
-FROM jolie_ud1.osm_sw sw
-JOIN conflation.conflation_test1 crossing
-ON ST_Intersects(crossing.osm_geom, sw.geom)
-WHERE   crossing.LABEL = 'crossing' AND
-		sw.geom NOT IN (
-						SELECT osm_geom
-						FROM conflation.conflation_test1 ) AND
-		ST_Length(sw.geom) < 10 -- leaving the two special cases OUT: osm_id = 490774566, 475987407
-
-	
--- next, finding links by perform st_intersects between the jolie_ud1.osm_footway_null with the crossing in the conflation table
---check point: see where crossing intersect with footway = null
-SELECT footway_null.tags, footway_null.geom, crossing.osm_geom
-FROM jolie_ud1.osm_footway_null footway_null
-JOIN conflation.conflation_test1 crossing
-ON ST_Intersects(crossing.osm_geom, footway_null.geom)
-WHERE crossing.LABEL = 'crossing'
--- not using this right now
 	
 	
 -- TODO: Confirm, what information do we need in a conflation table
