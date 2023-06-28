@@ -27,55 +27,8 @@ from arnold.wapr_linestring -- 159207
 select count(*)
 from arnold.wapr_hpms_submittal -- 159434
 
-SELECT *
-FROM arnold.wapr_linestring
-WHERE (routeid, beginmeasure, endmeasure) IN (
-    SELECT routeid, beginmeasure, endmeasure
-    FROM arnold.wapr_linestring
-    GROUP BY routeid, beginmeasure, endmeasure
-    HAVING COUNT(*) > 1
-); -- see how multilinestring is split
 
 select count(distinct routeid )
 from arnold.wapr_hpms_submittal -- 159207
-
-select *
-from arnold.wapr_hpms_submittal
-where st_astext(shape) ilike '%multilinestring%' -- 159434
-
-select count(*) 
-from arnold.wapr_hpms_submittal
-where st_astext(shape) ilike '%multilinestring%' -- 159434
-
--- check duplicate
-select geom, count(*)
-from arnold.wapr_linestring
-group by geom, shape_length 
-having count(*)>1
-
-SELECT routeid, COUNT(*) AS count
-  FROM arnold.wapr_hpms_submittal 
-  GROUP BY routeid
-  HAVING COUNT(*) > 1
-
-
-
-WITH routeid_dup AS (
-  SELECT routeid, COUNT(*) AS count
-  FROM arnold.wapr_linestring
-  GROUP BY routeid
-  HAVING COUNT(*) > 1
-)
-SELECT *
-FROM arnold.wapr_linestring wl
-JOIN routeid_dup dup ON dup.routeid = wl.routeid
-order by wl.routeid;
-		
-select *
-from arnold.wapr_linestring
-where geom IN (select geom
-				from arnold.wapr_linestring as count_dup
-				group by geom, shape_length 
-				having count(*)>1)
 
 -- error with converting the length of the line/mul, so let's not involve any length in this
