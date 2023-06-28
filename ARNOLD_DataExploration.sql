@@ -27,6 +27,15 @@ from arnold.wapr_linestring -- 159207
 select count(*)
 from arnold.wapr_hpms_submittal -- 159434
 
+SELECT *
+FROM arnold.wapr_linestring
+WHERE (routeid, beginmeasure, endmeasure) IN (
+    SELECT routeid, beginmeasure, endmeasure
+    FROM arnold.wapr_linestring
+    GROUP BY routeid, beginmeasure, endmeasure
+    HAVING COUNT(*) > 1
+); -- see how multilinestring is split
+
 select count(distinct routeid )
 from arnold.wapr_hpms_submittal -- 159207
 
