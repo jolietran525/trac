@@ -63,6 +63,9 @@ CREATE TABLE jolie_ud1.arnold_roads AS (
 	ORDER BY routeid, beginmeasure, endmeasure);
 
 
+
+
+
 --------------------------------------------
 			/* CONFLATION */
 --------------------------------------------
@@ -105,6 +108,11 @@ CREATE INDEX sw_geom ON jolie_ud1.osm_sw USING GIST (geom);
 CREATE INDEX crossing_geom ON jolie_ud1.osm_crossing USING GIST (geom);
 CREATE INDEX point_geom ON jolie_ud1.osm_point USING GIST (geom);
 CREATE INDEX footway_null_geom ON jolie_ud1.osm_footway_null USING GIST (geom);
+
+
+
+
+
 
 --------- STEP 2: identify matching criteria between sidewalk and arnold ---------
 -- since the arnold and the OSM datasets don't have any common attributes or identifiers, and their content represents
@@ -169,29 +177,12 @@ CREATE TABLE jolie_conflation.big_sw AS
 	  rank = 1;
 	 
 	 
--- dealing with the sidewalk segment that are 
-SELECT DISTINCT osm_sw.geom, big_sw.arnold_routeid, big_sw.arnold_beginmeasure, big_sw.arnold_endmeasure, big_sw.arnold_geom
-FROM jolie_ud1.osm_sw
-LEFT JOIN jolie_conflation.big_sw
-ON ST_Intersects(big_sw.osm_geom, st_startpoint(osm_sw.geom)) OR ST_Intersects(big_sw.osm_geom, st_endpoint(osm_sw.geom))
-WHERE osm_sw.geom NOT IN (
-		SELECT big_sw.osm_geom FROM jolie_conflation.big_sw big_sw
-	    UNION ALL
-	    SELECT link.osm_geom FROM jolie_conflation.connlink link 
-	    UNION ALL
-	    SELECT crossing.osm_geom FROM jolie_conflation.crossing crossing
-	    UNION ALL
-	    SELECT edge.osm_geom FROM jolie_conflation.sw_edges edge
-	    UNION ALL
-	    SELECT entrance.osm_geom FROM jolie_conflation.entrances entrance)
-	  AND (
-			ABS(DEGREES(ST_Angle(big_sw.osm_geom, osm_sw.geom))) BETWEEN 0 AND 10 -- 0 
-		    OR ABS(DEGREES(ST_Angle(big_sw.osm_geom, osm_sw.geom))) BETWEEN 170 AND 190 -- 180
-		    OR ABS(DEGREES(ST_Angle(big_sw.osm_geom, osm_sw.geom))) BETWEEN 350 AND 360  ) -- 360  
-	  AND (ST_Length(osm_sw.geom) + ST_Length(big_sw.osm_geom) ) < ST_Length(big_sw.arnold_geom)
-
 CREATE INDEX big_sw_sidwalk_geom ON jolie_conflation.big_sw USING GIST (osm_geom);
 CREATE INDEX big_sw_arnold_geom ON jolie_conflation.big_sw USING GIST (arnold_geom);
+
+
+
+
 
 
 -------------- STEP 3: How to deal with the rest of the footway = sidewalk segments? Possibilities are: edges, connecting link --------------
@@ -204,6 +195,8 @@ WHERE sidewalk.geom NOT IN (
 	-- TODO: weird case: 490774566
 	
 
+	
+	
 ---- STEP 3.1: Dealing with edges
 	-- assumption: edge will have it start and end point connectected to sidewalk. We will use the big_sw table to identify our sidewalk edges
 CREATE TABLE jolie_conflation.sw_edges (
@@ -236,6 +229,8 @@ INSERT INTO jolie_conflation.sw_edges (osm_id, arnold_routeid1, arnold_beginmeas
 			AND ST_Equals(centerline1.osm_geom, centerline2.osm_geom) IS FALSE
 
 
+			
+			
 ---- STEP 3.2: Dealing with entrances
 	-- assumption: entrances are small segments that intersect with the sidewalk on one end and intersect with a point that have a tag of entrance=* or wheelchair=*
 	
@@ -256,6 +251,8 @@ CREATE TABLE jolie_conflation.entrances AS
 	WHERE point.tags -> 'entrance' IS NOT NULL 
 			OR point.tags -> 'wheelchair' IS NOT NULL
 			
+			
+			
 
 ---- STEP 3.3: Dealing with crossing
 	-- assumption: all of the crossing are referred to as footway=crossing
@@ -271,11 +268,14 @@ CREATE TABLE jolie_conflation.crossing (osm_id, arnold_routeid, arnold_beginmeas
 -- note, there is one special case that is not joined in this table cuz it is not intersecting with any roads: osm_id 929628172. This crossing segment has the access=no
 
 	
+	
+	
 ---- STEP 3.4: Dealing with connecting link
 	-- assumption 1: a link connects the sidewalk to the crossing
 	-- assumption 2: OR a link connects the sidewalk esge to the crossing
 	-- note: a link might or might not have a footway='sidewalk' tag
 
+	
 -- check point: segments (footway=sidewalk) intersects crossing and not yet in conflation table --> link
 SELECT crossing.osm_id AS cross_id, sw.geom AS link_geom, crossing.osm_geom AS cross_geom, sw.osm_id AS link_id
 FROM jolie_conflation.crossing crossing
@@ -289,6 +289,8 @@ WHERE sw.geom NOT IN (
 	  ST_Length(sw.geom) < 10 -- leaving the two special cases OUT: osm_id = 490774566, 475987407
 ORDER BY link_id
 
+
+
 CREATE TABLE jolie_conflation.connlink (
 	osm_id INT8,
 	arnold_routeid1 VARCHAR(75), 
@@ -300,7 +302,8 @@ CREATE TABLE jolie_conflation.connlink (
 	osm_geom GEOMETRY(LineString, 3857)
 )
 
--- first, deal with links (footway = sidewalk) that are connected to crossing and not yet in the big_sw table
+
+-- STEP 3.4.1: Deal with links (footway = sidewalk) that are connected to crossing and not yet in the big_sw table
 INSERT INTO jolie_conflation.connlink (osm_id, arnold_routeid1, arnold_beginmeasure1, arnold_endmeasure1, arnold_routeid2, arnold_beginmeasure2, arnold_endmeasure2, osm_geom)
 WITH link_not_distinct AS (
     SELECT link_id, arnold_routeid, arnold_beginmeasure, arnold_endmeasure, cross_id, link_geom, ROW_NUMBER() OVER (PARTITION BY link_id ORDER BY cross_id) AS rn
@@ -352,7 +355,7 @@ ON ST_Intersects(sidewalk.geom, link_crossing.link_geom)
 
 
 
--- then, deal with link that are not tagged as sidewalk/crossing
+-- STEP 3.4.2: deal with link that are not tagged as sidewalk/crossing
 INSERT INTO jolie_conflation.connlink (osm_id, arnold_routeid1, arnold_beginmeasure1, arnold_endmeasure1, arnold_routeid2, arnold_beginmeasure2, arnold_endmeasure2, osm_geom)
 WITH link_not_distinct AS (
 SELECT link_crossing.link_id, link_crossing.cross_id, link_crossing.arnold_routeid, link_crossing.arnold_beginmeasure, link_crossing.arnold_endmeasure, link_crossing.link_geom AS link_geom, ROW_NUMBER() OVER (PARTITION BY link_crossing.link_id ORDER BY link_crossing.cross_id) AS rn
@@ -393,7 +396,7 @@ WITH conf_table AS (
 	    UNION ALL
 	    SELECT entrance.osm_geom, 'entrance' AS label FROM jolie_conflation.entrances entrance )
 SELECT sw.*
-FROM jolie_ud1.osm_sw sw
+FROM jolie_ud1.osm_footway_null sw
 LEFT JOIN conf_table ON sw.geom = conf_table.osm_geom
 WHERE conf_table.osm_geom IS NULL;
 
@@ -401,6 +404,41 @@ SELECT count(*) FROM jolie_conflation.big_sw -- 73
 SELECT count(*) FROM jolie_conflation.sw_edges -- 5
 SELECT count(*) FROM jolie_conflation.entrances --9
 SELECT count(*) FROM jolie_conflation.connlink --76
+
+
+
+
+----- STEP 4: Handle weird case:
+
+-- conflate into big_sw if the segment is parallel tp the sw, and have it end/start point intersect with another end/start point of the big_sw
+-- and also the sum of the segment and the big_sw should be less than the length of the road that the big_sw correspond to
+
+INSERT INTO jolie_conflation.big_sw(osm_id, arnold_routeid, arnold_beginmeasure, arnold_endmeasure, osm_geom, arnold_geom)
+SELECT DISTINCT osm_sw.osm_id, big_sw.arnold_routeid, big_sw.arnold_beginmeasure, big_sw.arnold_endmeasure, osm_sw.geom AS osm_geom, big_sw.arnold_geom
+FROM jolie_ud1.osm_sw
+JOIN jolie_conflation.big_sw
+ON 	ST_Intersects(st_startpoint(big_sw.osm_geom), st_startpoint(osm_sw.geom))
+	OR ST_Intersects(st_startpoint(big_sw.osm_geom), st_endpoint(osm_sw.geom))
+	OR ST_Intersects(st_endpoint(big_sw.osm_geom), st_startpoint(osm_sw.geom))
+	OR ST_Intersects(st_endpoint(big_sw.osm_geom), st_endpoint(osm_sw.geom))
+WHERE osm_sw.geom NOT IN (
+		SELECT big_sw.osm_geom FROM jolie_conflation.big_sw big_sw
+	    UNION ALL
+	    SELECT link.osm_geom FROM jolie_conflation.connlink link 
+	    UNION ALL
+	    SELECT crossing.osm_geom FROM jolie_conflation.crossing crossing
+	    UNION ALL
+	    SELECT edge.osm_geom FROM jolie_conflation.sw_edges edge
+	    UNION ALL
+	    SELECT entrance.osm_geom FROM jolie_conflation.entrances entrance)
+	  AND ( -- specify that the segment should be PARALLEL TO our conflated sidewalk
+			ABS(DEGREES(ST_Angle(big_sw.osm_geom, osm_sw.geom))) BETWEEN 0 AND 10 -- 0 
+		    OR ABS(DEGREES(ST_Angle(big_sw.osm_geom, osm_sw.geom))) BETWEEN 170 AND 190 -- 180
+		    OR ABS(DEGREES(ST_Angle(big_sw.osm_geom, osm_sw.geom))) BETWEEN 350 AND 360  ) -- 360  
+	  AND (ST_Length(osm_sw.geom) + ST_Length(big_sw.osm_geom) ) < ST_Length(big_sw.arnold_geom)
+
+
+
 
 -- LIMITATION: defined number and buffer cannot accurately represent all the sidewalk scenarios
 	-- TODO: buffer size when we look at how many lanes there are --> better size of buffering
