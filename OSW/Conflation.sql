@@ -168,6 +168,28 @@ CREATE TABLE jolie_conflation.big_sw AS
 	WHERE
 	  rank = 1;
 	 
+	 
+-- dealing with the sidewalk segment that are 
+SELECT DISTINCT osm_sw.geom, big_sw.arnold_routeid, big_sw.arnold_beginmeasure, big_sw.arnold_endmeasure, big_sw.arnold_geom
+FROM jolie_ud1.osm_sw
+LEFT JOIN jolie_conflation.big_sw
+ON ST_Intersects(big_sw.osm_geom, st_startpoint(osm_sw.geom)) OR ST_Intersects(big_sw.osm_geom, st_endpoint(osm_sw.geom))
+WHERE osm_sw.geom NOT IN (
+		SELECT big_sw.osm_geom FROM jolie_conflation.big_sw big_sw
+	    UNION ALL
+	    SELECT link.osm_geom FROM jolie_conflation.connlink link 
+	    UNION ALL
+	    SELECT crossing.osm_geom FROM jolie_conflation.crossing crossing
+	    UNION ALL
+	    SELECT edge.osm_geom FROM jolie_conflation.sw_edges edge
+	    UNION ALL
+	    SELECT entrance.osm_geom FROM jolie_conflation.entrances entrance)
+	  AND (
+			ABS(DEGREES(ST_Angle(big_sw.osm_geom, osm_sw.geom))) BETWEEN 0 AND 10 -- 0 
+		    OR ABS(DEGREES(ST_Angle(big_sw.osm_geom, osm_sw.geom))) BETWEEN 170 AND 190 -- 180
+		    OR ABS(DEGREES(ST_Angle(big_sw.osm_geom, osm_sw.geom))) BETWEEN 350 AND 360  ) -- 360  
+	  AND (ST_Length(osm_sw.geom) + ST_Length(big_sw.osm_geom) ) < ST_Length(big_sw.arnold_geom)
+
 CREATE INDEX big_sw_sidwalk_geom ON jolie_conflation.big_sw USING GIST (osm_geom);
 CREATE INDEX big_sw_arnold_geom ON jolie_conflation.big_sw USING GIST (arnold_geom);
 
@@ -361,26 +383,19 @@ GROUP BY
  
 -- checkpoint: see what is there in conflation tables
 WITH conf_table AS (
-    SELECT big_sw.osm_geom FROM jolie_conflation.big_sw big_sw
-    UNION ALL
-    SELECT link.osm_geom FROM jolie_conflation.connlink link 
-    UNION ALL
-    SELECT crossing.osm_geom FROM jolie_conflation.crossing crossing
-    UNION ALL
-    SELECT edge.osm_geom FROM jolie_conflation.sw_edges edge
-    UNION ALL
-    SELECT entrance.osm_geom FROM jolie_conflation.entrances entrance
-)
+		SELECT big_sw.osm_geom, 'sidewalk' AS label FROM jolie_conflation.big_sw big_sw
+	    UNION ALL
+	    SELECT link.osm_geom, 'link' AS label FROM jolie_conflation.connlink link 
+	    UNION ALL
+	    SELECT crossing.osm_geom, 'crossing' AS label FROM jolie_conflation.crossing crossing
+	    UNION ALL
+	    SELECT edge.osm_geom, 'edge' AS label FROM jolie_conflation.sw_edges edge
+	    UNION ALL
+	    SELECT entrance.osm_geom, 'entrance' AS label FROM jolie_conflation.entrances entrance )
 SELECT sw.*
 FROM jolie_ud1.osm_sw sw
 LEFT JOIN conf_table ON sw.geom = conf_table.osm_geom
 WHERE conf_table.osm_geom IS NULL;
-
-SELECT osm_id
-
--- TODO: Confirm, what information do we need in a conflation table
--- TODO: revise the conflation table schema
--- TODO: Design a permanent id to refer
 
 SELECT count(*) FROM jolie_conflation.big_sw -- 73
 SELECT count(*) FROM jolie_conflation.sw_edges -- 5
