@@ -131,47 +131,47 @@ FROM jolie_uni1.arnold_segments_line; -- there ARE 59 segments
 -- 4. Ignore those roads that are smaller than 10 meters
 -- Create a big_sw table which contains 65 sidewalk segments that are greater 10 meters and parallel to the road. This is pretty solid.
 
-
-CREATE TABLE jolie_conflation_uni1.big_sw AS
-	WITH ranked_roads AS (
-	  SELECT
-	    sidewalk.osm_id AS osm_id,
-	    road.routeid AS arnold_routeid,
-	    road.beginmeasure AS arnold_beginmeasure,
-	    road.endmeasure AS arnold_endmeasure,
-	  	sidewalk.geom AS osm_geom,
-	    road.geom AS arnold_geom,
-	    ABS(DEGREES(ST_Angle(road.geom, sidewalk.geom))) AS angle_degrees,
-	    ST_Distance(ST_LineInterpolatePoint(road.geom, 0.5), ST_LineInterpolatePoint(sidewalk.geom, 0.5)) AS midpoints_distance,
-	    sidewalk.tags AS tags,
-	    -- rank this based on the distance of the midpoint of the sidewalk to the midpoint of the road
-	    ROW_NUMBER() OVER (PARTITION BY sidewalk.geom ORDER BY ST_Distance(ST_LineInterpolatePoint(road.geom, 0.5), ST_LineInterpolatePoint(sidewalk.geom, 0.5)) ) AS RANK
-	  FROM
-	    jolie_uni1.osm_sw sidewalk
-	  JOIN
-	    jolie_uni1.arnold_segments_line road
-	  ON
-	    ST_Intersects(ST_Buffer(sidewalk.geom, 2), ST_Buffer(road.geom, 15))  -- TODO: need TO MODIFY so so we have better number, what IF there 
-	  WHERE (
-	    		ABS(DEGREES(ST_Angle(road.geom, sidewalk.geom))) BETWEEN 0 AND 10 -- 0 
-		    	OR ABS(DEGREES(ST_Angle(road.geom, sidewalk.geom))) BETWEEN 170 AND 190 -- 180
-		    	OR ABS(DEGREES(ST_Angle(road.geom, sidewalk.geom))) BETWEEN 350 AND 360 -- 360
-	    	) 
-	   		AND (  ST_length(sidewalk.geom) > 10 ) -- IGNORE sidewalk that ARE shorter than 10 meters
-	)
-	SELECT DISTINCT
-	  osm_id,
-	  arnold_routeid,
-	  arnold_beginmeasure,
-	  arnold_endmeasure,
-	  osm_geom,
-	  arnold_geom
-	FROM
-	  ranked_roads
-	WHERE
-	  rank = 1;
+-- Old one
+--CREATE TABLE jolie_conflation_uni1.big_sw AS
+--	WITH ranked_roads AS (
+--	  SELECT
+--	    sidewalk.osm_id AS osm_id,
+--	    road.routeid AS arnold_routeid,
+--	    road.beginmeasure AS arnold_beginmeasure,
+--	    road.endmeasure AS arnold_endmeasure,
+--	  	sidewalk.geom AS osm_geom,
+--	    road.geom AS arnold_geom,
+--	    ABS(DEGREES(ST_Angle(road.geom, sidewalk.geom))) AS angle_degrees,
+--	    ST_Distance(ST_LineInterpolatePoint(road.geom, 0.5), ST_LineInterpolatePoint(sidewalk.geom, 0.5)) AS midpoints_distance,
+--	    sidewalk.tags AS tags,
+--	    -- rank this based on the distance of the midpoint of the sidewalk to the midpoint of the road
+--	    ROW_NUMBER() OVER (PARTITION BY sidewalk.geom ORDER BY ST_Distance(ST_LineInterpolatePoint(road.geom, 0.5), ST_LineInterpolatePoint(sidewalk.geom, 0.5)) ) AS RANK
+--	  FROM
+--	    jolie_uni1.osm_sw sidewalk
+--	  JOIN
+--	    jolie_uni1.arnold_segments_line road
+--	  ON
+--	    ST_Intersects(ST_Buffer(sidewalk.geom, 2), ST_Buffer(road.geom, 15))  -- TODO: need TO MODIFY so so we have better number, what IF there 
+--	  WHERE (
+--	    		ABS(DEGREES(ST_Angle(road.geom, sidewalk.geom))) BETWEEN 0 AND 10 -- 0 
+--		    	OR ABS(DEGREES(ST_Angle(road.geom, sidewalk.geom))) BETWEEN 170 AND 190 -- 180
+--		    	OR ABS(DEGREES(ST_Angle(road.geom, sidewalk.geom))) BETWEEN 350 AND 360 -- 360
+--	    	) 
+--	   		AND (  ST_length(sidewalk.geom) > 10 ) -- IGNORE sidewalk that ARE shorter than 10 meters
+--	)
+--	SELECT DISTINCT
+--	  osm_id,
+--	  arnold_routeid,
+--	  arnold_beginmeasure,
+--	  arnold_endmeasure,
+--	  osm_geom,
+--	  arnold_geom
+--	FROM
+--	  ranked_roads
+--	WHERE
+--	  rank = 1;
 	 
-	 
+-- new one
 CREATE TABLE jolie_conflation_uni1.big_sw AS
 WITH ranked_roads AS (
 	SELECT
@@ -424,8 +424,9 @@ FROM jolie_uni1.osm_sw sw
 LEFT JOIN conf_table ON sw.geom = conf_table.osm_geom
 WHERE conf_table.osm_geom IS NULL
 UNION ALL 
-	SELECT geom, 'road' AS label FROM jolie_uni1.arnold_segments_line
-;
+	SELECT geom, 'road' AS label FROM jolie_uni1.arnold_segments_line;
+
+
 
 SELECT count(*) FROM jolie_conflation_uni1.big_sw -- 65
 SELECT count(*) FROM jolie_conflation_uni1.sw_edges -- 2
