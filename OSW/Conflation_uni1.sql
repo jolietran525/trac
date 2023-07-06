@@ -218,6 +218,10 @@ INSERT INTO jolie_conflation_uni1.sw_edges (osm_id, arnold_routeid1, arnold_begi
 				FROM jolie_conflation_uni1.big_sw sw)
 			AND ST_Equals(centerline1.osm_geom, centerline2.osm_geom) IS FALSE --2
 			
+SELECT sw.*, point.tags, point.geom
+FROM jolie_conflation_uni1.big_sw sw
+JOIN jolie_uni1.osm_point point
+ON ST_Intersects(st_startpoint(sw.osm_geom), point.geom) OR ST_Intersects(st_endpoint(sw.osm_geom), point.geom)
 			
 ---- STEP 3.2: Dealing with entrances
 	-- assumption: entrances are small segments that intersect with the sidewalk on one end and intersect with a point that have a tag of entrance=* or wheelchair=*
@@ -243,6 +247,20 @@ INSERT INTO jolie_conflation_uni1.sw_edges (osm_id, arnold_routeid1, arnold_begi
 --			)
 			
 			
+CREATE TABLE jolie_conflation_uni1.entrances AS
+	SELECT entrance.osm_id, sidewalk.osm_id AS sidewalk_id, entrance.geom AS osm_geom
+	FROM jolie_uni1.osm_point point
+	JOIN (	SELECT *
+			FROM jolie_uni1.osm_sw sidewalk
+			WHERE sidewalk.geom NOT IN (
+					SELECT osm_geom
+					FROM jolie_conflation_uni1.big_sw ) AND 
+				  sidewalk.geom NOT IN (
+					SELECT osm_geom
+					FROM jolie_conflation_uni1.sw_edges )  ) AS entrance
+	ON ST_intersects(entrance.geom, point.geom)
+	JOIN jolie_conflation_uni1.big_sw sidewalk ON ST_Intersects((entrance.geom), sidewalk.osm_geom)
+	WHERE point.tags -> 'entrance' IS NOT NULL 	
 			
 
 ---- STEP 3.3: Dealing with crossing
@@ -384,10 +402,13 @@ WITH conf_table AS (
 	    UNION ALL
 	    SELECT CAST(edge.osm_id AS varchar(75)) AS id, edge.osm_geom, 'edge' AS label FROM jolie_conflation_uni1.sw_edges edge
 	    )
-SELECT sw.osm_id AS id, sw.tags, sw.geom
+SELECT sw.geom
 FROM jolie_uni1.osm_sw sw
 LEFT JOIN conf_table ON sw.geom = conf_table.osm_geom
 WHERE conf_table.osm_geom IS NULL
+UNION ALL
+SELECT arnold.geom
+FROM jolie_uni1.arnold_roads arnold
 
 
 SELECT count(*) FROM jolie_conflation_uni1.big_sw -- 65
@@ -426,7 +447,7 @@ FROM jolie_uni1.weird_case a
 JOIN vertices b ON a.osm_id = b.osm_id
 GROUP BY a.osm_id, a.geom;
 
--- conflate into big_sw if the segment is parallel tp the sw, and have it end/start point intersect with another end/start point of the big_sw
+-- conflate into big_sw if the segment is parallel to the sw, and have it end/start point intersect with another end/start point of the big_sw
 -- and also the sum of the segment and the big_sw should be less than the length of the road that the big_sw correspond to
 
 INSERT INTO jolie_conflation_uni1.big_sw(osm_id, arnold_routeid, arnold_beginmeasure, arnold_endmeasure, osm_geom, arnold_geom)

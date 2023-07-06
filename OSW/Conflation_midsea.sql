@@ -127,43 +127,6 @@ CREATE INDEX footway_null_geom ON jolie_midsea.osm_footway_null USING GIST (geom
 --    from the midpoint of the sidewalk to the midpoint of the road
 -- 4. Ignore those roads that are smaller than 10 meters
 -- Create a big_sw table which contains 65 sidewalk segments that are greater 10 meters and parallel to the road. This is pretty solid.
-
--- Old one
---CREATE TABLE jolie_conflation_midsea.big_sw AS
---	WITH ranked_roads AS (
---	  SELECT
---	    sidewalk.osm_id AS osm_id,
---	    road.routeid AS arnold_routeid,
---	    road.beginmeasure AS arnold_beginmeasure,
---	    road.endmeasure AS arnold_endmeasure,
---	  	sidewalk.geom AS osm_geom,
---	    road.geom AS arnold_geom,
---	    -- rank this based on the distance of the midpoint of the sidewalk to the midpoint of the road
---	    ROW_NUMBER() OVER (PARTITION BY sidewalk.geom ORDER BY ST_Distance(ST_LineInterpolatePoint(road.geom, 0.5), ST_LineInterpolatePoint(sidewalk.geom, 0.5)) ) AS RANK
---	  FROM
---	    jolie_midsea.osm_sw sidewalk
---	  JOIN
---	    jolie_midsea.arnold_segments_line road
---	  ON
---	    ST_Intersects(ST_Buffer(sidewalk.geom, 2), ST_Buffer(road.geom, 15))  -- TODO: need TO MODIFY so so we have better number, what IF there 
---	  WHERE (
---	    		ABS(DEGREES(ST_Angle(road.geom, sidewalk.geom))) BETWEEN 0 AND 10 -- 0 
---		    	OR ABS(DEGREES(ST_Angle(road.geom, sidewalk.geom))) BETWEEN 170 AND 190 -- 180
---		    	OR ABS(DEGREES(ST_Angle(road.geom, sidewalk.geom))) BETWEEN 350 AND 360 -- 360
---	    	) 
---	   		AND (  ST_length(sidewalk.geom) > 10 ) -- IGNORE sidewalk that ARE shorter than 10 meters
---	)
---	SELECT DISTINCT
---	  osm_id,
---	  arnold_routeid,
---	  arnold_beginmeasure,
---	  arnold_endmeasure,
---	  osm_geom,
---	  arnold_geom
---	FROM
---	  ranked_roads
---	WHERE
---	  rank = 1;
 	 
 -- new one
 CREATE TABLE jolie_conflation_midsea.big_sw AS -- 8840
@@ -277,6 +240,19 @@ INSERT INTO jolie_conflation_midsea.sw_edges (osm_id, arnold_routeid1, arnold_be
 --				FROM jolie_conflation_midsea.connlink
 --			)
 			
+	SELECT entrance.osm_id, sidewalk.osm_id AS sidewalk_id, entrance.geom AS osm_geom, point.tags
+	FROM jolie_midsea.osm_point point
+	JOIN (	SELECT *
+			FROM jolie_midsea.osm_sw sidewalk
+			WHERE sidewalk.geom NOT IN (
+					SELECT osm_geom
+					FROM jolie_conflation_midsea.big_sw ) AND 
+				  sidewalk.geom NOT IN (
+					SELECT osm_geom
+					FROM jolie_conflation_midsea.sw_edges )  ) AS entrance
+	ON ST_intersects(entrance.geom, point.geom)
+	JOIN jolie_conflation_midsea.big_sw sidewalk ON ST_Intersects((entrance.geom), sidewalk.osm_geom)
+	WHERE point.tags -> 'entrance' IS NOT NULL 	
 			
 			
 
