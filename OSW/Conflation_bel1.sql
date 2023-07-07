@@ -251,11 +251,10 @@ INSERT INTO jolie_conflation_bel1.sw_edges (osm_id, arnold_objectid1, arnold_obj
 			AND centerline1.arnold_objectid != centerline2.arnold_objectid -- 19
 			
 			
-
+---- STEP 6: Dealing with osm_sw that is parallel with a conflated sidewalk
 
 -- conflate into sidewalk if the segment is parallel to the sw, and have it end/start point intersect with another end/start point of the sidewalk
 -- and the arnold_objectid of the conflated sidewalk must be the same as the road's og_objectid where the segment is looking at
-
 INSERT INTO jolie_conflation_bel1.sidewalk(osm_id, arnold_objectid, osm_geom, arnold_geom)
 WITH ranked_road AS (
 	SELECT DISTINCT osm_sw.osm_id, sidewalk.arnold_objectid, osm_sw.geom AS osm_geom,
@@ -298,8 +297,7 @@ WITH ranked_road AS (
 			
 			
 
- 
- 
+
 -- checkpoint: see what is there in conflation tables
 WITH conf_table AS (
 		SELECT CAST(sidewalk.osm_id AS varchar(75)) AS id, sidewalk.osm_geom, 'sidewalk' AS label FROM jolie_conflation_bel1.sidewalk sidewalk
@@ -321,20 +319,11 @@ WHERE conf_table.osm_geom IS NULL
 
 
 
+--------------------------------------------
+		/** WEIRD CASES **/
+--------------------------------------------
 
 
-
-
-
-
-
-
-
-
-
-
-
------ STEP 4: Handle weird case:
 
 -- create a table of weird cases
 CREATE TABLE jolie_bel1.weird_case AS
