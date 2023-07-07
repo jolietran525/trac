@@ -426,7 +426,7 @@ INSERT INTO temp_weird_case_sw (osm_id, segment_number, osm_geom, arnold_objecti
 --ORDER BY seg.osm_id, seg.segment_number
 
 
-
+-- see how much segments conflated
 WITH partial_length AS (
 	  SELECT osm_id, arnold_objectid,  MIN(segment_number) AS min_segment, MAX(segment_number) AS max_segment, SUM(ST_Length(osm_geom)) AS partial_length, st_linemerge(ST_union(osm_geom), TRUE) AS geom
 	  FROM temp_weird_case_sw
@@ -438,7 +438,7 @@ WITH partial_length AS (
 
 
 
-
+-- see how the rest of the segments that cannot be conflated look
 WITH conf_seg AS (
 	  SELECT osm_id, arnold_objectid,  MIN(segment_number) AS min_segment, MAX(segment_number) AS max_segment, st_linemerge(ST_union(osm_geom), TRUE) AS geom
 	  FROM temp_weird_case_sw
