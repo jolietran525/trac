@@ -75,7 +75,7 @@ CREATE INDEX arnold_roads_geom ON jolie_bel1.arnold_roads USING GIST (geom);
 SELECT crossing.osm_id, crossing.geom
 FROM jolie_bel1.osm_crossing crossing -- 114
 
-CREATE TABLE jolie_conflation_bel1.crossing (osm_id, arnold_objectid, osm_geom) AS
+CREATE TABLE jolie_bel1.confation_crossing (osm_id, arnold_objectid, osm_geom) AS
 	SELECT crossing.osm_id AS osm_id, road.og_objectid AS arnold_objectid, crossing.geom AS osm_geom
 	FROM jolie_bel1.osm_crossing crossing
 	JOIN jolie_bel1.arnold_roads road
@@ -84,7 +84,7 @@ CREATE TABLE jolie_conflation_bel1.crossing (osm_id, arnold_objectid, osm_geom) 
 ---- STEP 2: Dealing with entrances
 	-- assumption: entrances are small footway=sidewalk segments that intersect with a point that have a tag of entrance=*
 	
-CREATE TABLE jolie_conflation_bel1.entrances AS
+CREATE TABLE jolie_bel1.confation_entrances AS
 	SELECT entrance.osm_id, entrance.geom AS osm_geom
 	FROM jolie_bel1.osm_point point
 	JOIN jolie_bel1.osm_sw entrance
@@ -98,7 +98,7 @@ CREATE TABLE jolie_conflation_bel1.entrances AS
 	-- note: a link might or might not have a footway='sidewalk' tag
 
 	
-CREATE TABLE jolie_conflation_bel1.connlink (
+CREATE TABLE jolie_bel1.confation_connlink (
 	osm_id INT8,
 	road_num INT4,
 	arnold_objectid INT8,
@@ -109,14 +109,9 @@ CREATE TABLE jolie_conflation_bel1.connlink (
 -- STEP 3.1: Deal with links (footway = sidewalk) that are connected to crossing and less than 12 meters
 
 -- check point: segments (footway=sidewalk) intersects crossing (conlfated)
-SELECT crossing.osm_id AS cross_id, sw.geom AS link_geom, crossing.osm_geom AS cross_geom, sw.osm_id AS link_id
-FROM jolie_conflation_bel1.crossing crossing
-JOIN jolie_bel1.osm_sw sw ON ST_Intersects(crossing.osm_geom, sw.geom)
-WHERE ST_Length(sw.geom) < 12
-
-INSERT INTO jolie_conflation_bel1.connlink (osm_id, road_num, arnold_objectid, osm_geom)
+INSERT INTO jolie_bel1.confation_connlink (osm_id, road_num, arnold_objectid, osm_geom)
 	SELECT link.osm_id AS osm_id, ROW_NUMBER() OVER (PARTITION BY link.osm_id ORDER BY crossing.arnold_objectid) AS road_num, crossing.arnold_objectid AS arnold_objectid, link.geom AS osm_geom
-    FROM jolie_conflation_bel1.crossing crossing
+    FROM jolie_bel1.confation_crossing crossing
     JOIN jolie_bel1.osm_sw link
     ON ST_Intersects(crossing.osm_geom, st_startpoint(link.geom)) OR ST_Intersects(crossing.osm_geom, st_endpoint(link.geom))
     WHERE ST_length(link.geom) < 12
@@ -125,24 +120,17 @@ INSERT INTO jolie_conflation_bel1.connlink (osm_id, road_num, arnold_objectid, o
 -- STEP 3.2: deal with link that are not tagged as sidewalk/crossing
 
 -- check point: how highway=footway and footway IS NULL vs crossing (conflated) are connected?
-SELECT link.osm_id AS link_id, crossing.osm_id AS cross_id, crossing.arnold_objectid, crossing.osm_geom AS cross_geom, link.geom AS link_geom
-FROM jolie_bel1.osm_footway_null link
-JOIN jolie_conflation_bel1.crossing crossing
-ON ST_Intersects(link.geom, crossing.osm_geom)
-WHERE ST_Length(link.geom) < 12
-
-
-INSERT INTO jolie_conflation_bel1.connlink (osm_id, road_num, arnold_objectid, osm_geom)
+INSERT INTO jolie_bel1.confation_connlink (osm_id, road_num, arnold_objectid, osm_geom)
 	SELECT link.osm_id AS link_id, ROW_NUMBER() OVER (PARTITION BY link.osm_id ORDER BY crossing.arnold_objectid) AS road_num, crossing.arnold_objectid AS arnold_objectid, link.geom AS link_geom
 		FROM jolie_bel1.osm_footway_null link
-		JOIN jolie_conflation_bel1.crossing crossing
+		JOIN jolie_bel1.confation_crossing crossing
 		ON ST_Intersects(link.geom, crossing.osm_geom)  
 		WHERE ST_Length(link.geom) < 12
 		ORDER BY link.osm_id; -- 86
 
 
 SELECT DISTINCT osm_id
-FROM jolie_conflation_bel1.connlink -- DISTINCT 80
+FROM jolie_bel1.confation_connlink -- DISTINCT 80
 
 
 ---- STEP 3.3: Give a table that include all connlink regardless of it conflated to the road or not
@@ -158,17 +146,17 @@ JOIN jolie_bel1.osm_footway_null link ON ST_Intersects(crossing.geom, link.geom)
 WHERE ST_Length(link.geom) < 12
 ORDER BY link.osm_id -- 103
 
-CREATE TABLE jolie_bel1.osm_sw_connlink AS (
-	SELECT DISTINCT link.osm_id AS link_osm_id, link.geom AS link_geom
+CREATE TABLE jolie_bel1.osm_connlink_all AS
+  (	SELECT DISTINCT link.osm_id AS link_osm_id, 'footway=sidewalk' AS label, link.geom AS link_geom
 	FROM jolie_bel1.osm_crossing crossing
 	JOIN jolie_bel1.osm_sw link ON ST_Intersects(crossing.geom, link.geom)
 	WHERE ST_Length(link.geom) < 12 ) -- 41
-
-CREATE TABLE jolie_bel1.osm_footway_null_connlink AS (
-	SELECT DISTINCT link.osm_id AS link_osm_id, link.geom AS link_geom
+	UNION ALL
+ (  SELECT DISTINCT link.osm_id AS link_osm_id, 'footway IS NULL' AS label, link.geom AS link_geom
 	FROM jolie_bel1.osm_crossing crossing
 	JOIN jolie_bel1.osm_footway_null link ON ST_Intersects(crossing.geom, link.geom)
-	WHERE ST_Length(link.geom) < 12 ) -- 93
+	WHERE ST_Length(link.geom) < 12 ) --93
+
 
 
 ---- STEP 4: deal with general case of sidewalk
@@ -180,7 +168,7 @@ CREATE TABLE jolie_bel1.osm_footway_null_connlink AS (
 --    from the midpoint of the sidewalk to the midpoint of the road
 -- 4. Ignore those roads that are already entrance, connlink table
 
-CREATE TABLE jolie_conflation_bel1.sidewalk AS
+CREATE TABLE jolie_bel1.confation_sidewalk AS
 WITH ranked_roads AS (
 	SELECT
 	  sidewalk.osm_id AS osm_id,
@@ -213,40 +201,40 @@ FROM
 WHERE
 	  rank = 1
 	  AND ( osm_id NOT IN (
- 				SELECT link.osm_id FROM jolie_conflation_bel1.connlink link 
+ 				SELECT link.osm_id FROM jolie_bel1.confation_connlink link 
 			    UNION ALL
-			    SELECT entrance.osm_id FROM jolie_conflation_bel1.entrances entrance)	
+			    SELECT entrance.osm_id FROM jolie_bel1.confation_entrances entrance)	
  	      ); -- 182
 	 
 
-CREATE INDEX sidwalk_sidwalk_geom ON jolie_conflation_bel1.sidewalk USING GIST (osm_geom);
-CREATE INDEX sidwalk_arnold_geom ON jolie_conflation_bel1.sidewalk USING GIST (arnold_geom);
+CREATE INDEX sidwalk_sidwalk_geom ON jolie_bel1.confation_sidewalk USING GIST (osm_geom);
+CREATE INDEX sidwalk_arnold_geom ON jolie_bel1.confation_sidewalk USING GIST (arnold_geom);
 	
 
 
 ---- STEP 5: Dealing with edges
 	-- assumption: edge will have it start and end point connectected to sidewalk. We will use the sidewalk table to identify our sidewalk edges
-CREATE TABLE jolie_conflation_bel1.sw_edges (
+CREATE TABLE jolie_bel1.confation_sw_edges (
 	osm_id INT8,
 	arnold_objectid1 INT8,
 	arnold_objectid2 INT8,
 	osm_geom GEOMETRY(LineString, 3857) )
 
 
-INSERT INTO jolie_conflation_bel1.sw_edges (osm_id, arnold_objectid1, arnold_objectid2, osm_geom)
+INSERT INTO jolie_bel1.confation_sw_edges (osm_id, arnold_objectid1, arnold_objectid2, osm_geom)
 	SELECT  edge.osm_id AS osm_id,
 			centerline1.arnold_objectid AS arnold_objectid1,
 			centerline1.arnold_objectid AS arnold_objectid2,
 			edge.geom AS osm_geom
 	FROM jolie_bel1.osm_sw edge
-	JOIN jolie_conflation_bel1.sidewalk centerline1 ON st_intersects(st_startpoint(edge.geom), centerline1.osm_geom)
-	JOIN jolie_conflation_bel1.sidewalk centerline2 ON st_intersects(st_endpoint(edge.geom), centerline2.osm_geom)
+	JOIN jolie_bel1.confation_sidewalk centerline1 ON st_intersects(st_startpoint(edge.geom), centerline1.osm_geom)
+	JOIN jolie_bel1.confation_sidewalk centerline2 ON st_intersects(st_endpoint(edge.geom), centerline2.osm_geom)
 	WHERE   edge.geom NOT IN (
-				SELECT sw.osm_geom FROM jolie_conflation_bel1.sidewalk sw
+				SELECT sw.osm_geom FROM jolie_bel1.confation_sidewalk sw
 				UNION ALL 
-				SELECT link.osm_geom FROM jolie_conflation_bel1.connlink link
+				SELECT link.osm_geom FROM jolie_bel1.confation_connlink link
 				UNION ALL 
-				SELECT entrance.osm_geom FROM jolie_conflation_bel1.entrances entrance)
+				SELECT entrance.osm_geom FROM jolie_bel1.confation_entrances entrance)
 			AND ST_Equals(centerline1.osm_geom, centerline2.osm_geom) IS FALSE
 			AND centerline1.arnold_objectid != centerline2.arnold_objectid -- 19
 			
@@ -255,7 +243,7 @@ INSERT INTO jolie_conflation_bel1.sw_edges (osm_id, arnold_objectid1, arnold_obj
 
 -- conflate into sidewalk if the segment is parallel to the sw, and have it end/start point intersect with another end/start point of the sidewalk
 -- and the arnold_objectid of the conflated sidewalk must be the same as the road's og_objectid where the segment is looking at
-INSERT INTO jolie_conflation_bel1.sidewalk(osm_id, arnold_objectid, osm_geom, arnold_geom)
+INSERT INTO jolie_bel1.confation_sidewalk(osm_id, arnold_objectid, osm_geom, arnold_geom)
 WITH ranked_road AS (
 	SELECT DISTINCT osm_sw.osm_id, sidewalk.arnold_objectid, osm_sw.geom AS osm_geom,
 		            ST_LineSubstring( big_road.geom, LEAST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(osm_sw.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(osm_sw.geom), big_road.geom))), GREATEST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(osm_sw.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(osm_sw.geom), big_road.geom))) ) AS seg_geom,
@@ -269,7 +257,7 @@ WITH ranked_road AS (
 					  				osm_sw.geom )
 					  	) AS RANK
 	FROM jolie_bel1.osm_sw
-	JOIN jolie_conflation_bel1.sidewalk
+	JOIN jolie_bel1.confation_sidewalk sidewalk
 	ON 	ST_Intersects(st_startpoint(sidewalk.osm_geom), st_startpoint(osm_sw.geom))
 		OR ST_Intersects(st_startpoint(sidewalk.osm_geom), st_endpoint(osm_sw.geom))
 		OR ST_Intersects(st_endpoint(sidewalk.osm_geom), st_startpoint(osm_sw.geom))
@@ -277,13 +265,13 @@ WITH ranked_road AS (
 	JOIN jolie_bel1.arnold_roads big_road
 	ON ST_Intersects(ST_Buffer(osm_sw.geom, 5), ST_Buffer(osm_sw.geom, 18))
 	WHERE osm_sw.geom NOT IN (
-			SELECT sidewalk.osm_geom FROM jolie_conflation_bel1.sidewalk sidewalk
+			SELECT sidewalk.osm_geom FROM jolie_bel1.confation_sidewalk sidewalk
 		    UNION ALL
-		    SELECT link.osm_geom FROM jolie_conflation_bel1.connlink link 
+		    SELECT link.osm_geom FROM jolie_bel1.confation_connlink link 
 		    UNION ALL
-		    SELECT entrance.osm_geom FROM jolie_conflation_bel1.entrances entrance
+		    SELECT entrance.osm_geom FROM jolie_bel1.confation_entrances entrance
 		    UNION ALL
-		    SELECT edge.osm_geom FROM jolie_conflation_bel1.sw_edges edge )
+		    SELECT edge.osm_geom FROM jolie_bel1.confation_sw_edges edge )
 		  AND ( -- specify that the segment should be PARALLEL TO our conflated sidewalk
 				ABS(DEGREES(ST_Angle(sidewalk.osm_geom, osm_sw.geom))) BETWEEN 0 AND 10 -- 0 
 			    OR ABS(DEGREES(ST_Angle(sidewalk.osm_geom, osm_sw.geom))) BETWEEN 170 AND 190 -- 180
@@ -300,22 +288,20 @@ WITH ranked_road AS (
 
 -- checkpoint: see what is there in conflation tables
 WITH conf_table AS (
-		SELECT CAST(sidewalk.osm_id AS varchar(75)) AS id, sidewalk.osm_geom, 'sidewalk' AS label FROM jolie_conflation_bel1.sidewalk sidewalk
+		SELECT CAST(sidewalk.osm_id AS varchar(75)) AS id, sidewalk.osm_geom, 'sidewalk' AS label FROM jolie_bel1.confation_sidewalk sidewalk
 	    UNION ALL
-	    SELECT CAST(link.osm_id AS varchar(75)) AS id, link.osm_geom, 'link' AS label FROM jolie_conflation_bel1.connlink link 
+	    SELECT CAST(link.osm_id AS varchar(75)) AS id, link.osm_geom, 'link' AS label FROM jolie_bel1.confation_connlink link 
 	    UNION ALL
-	    SELECT CAST(crossing.osm_id AS varchar(75)) AS id, crossing.osm_geom, 'crossing' AS label FROM jolie_conflation_bel1.crossing crossing
+	    SELECT CAST(crossing.osm_id AS varchar(75)) AS id, crossing.osm_geom, 'crossing' AS label FROM jolie_bel1.confation_crossing crossing
 	    UNION ALL
-	    SELECT CAST(edge.osm_id AS varchar(75)) AS id, edge.osm_geom, 'edge' AS label FROM jolie_conflation_bel1.sw_edges edge
+	    SELECT CAST(edge.osm_id AS varchar(75)) AS id, edge.osm_geom, 'edge' AS label FROM jolie_bel1.confation_sw_edges edge
 	    UNION ALL
-	    SELECT CAST(entrance.osm_id AS varchar(75)) AS id, entrance.osm_geom, 'entrance' AS label FROM jolie_conflation_bel1.entrances entrance
+	    SELECT CAST(entrance.osm_id AS varchar(75)) AS id, entrance.osm_geom, 'entrance' AS label FROM jolie_bel1.confation_entrances entrance
 	    )
 SELECT CAST(sw.osm_id AS varchar(75)) AS id, sw.geom, 'not conflated' AS label
 FROM jolie_bel1.osm_sw sw
 LEFT JOIN conf_table ON sw.geom = conf_table.osm_geom
 WHERE conf_table.osm_geom IS NULL
-
-
 
 
 
@@ -328,15 +314,15 @@ WHERE conf_table.osm_geom IS NULL
 -- create a table of weird cases
 CREATE TABLE jolie_bel1.weird_case AS
 	WITH conf_table AS (
-			SELECT CAST(sidewalk.osm_id AS varchar(75)) AS id, sidewalk.osm_geom, 'sidewalk' AS label FROM jolie_conflation_bel1.sidewalk sidewalk
+			SELECT CAST(sidewalk.osm_id AS varchar(75)) AS id, sidewalk.osm_geom, 'sidewalk' AS label FROM jolie_bel1.confation_sidewalk sidewalk
 		    UNION ALL
-		    SELECT CAST(link.osm_id AS varchar(75)) AS id, link.osm_geom, 'link' AS label FROM jolie_conflation_bel1.connlink link 
+		    SELECT CAST(link.osm_id AS varchar(75)) AS id, link.osm_geom, 'link' AS label FROM jolie_bel1.confation_connlink link 
 		    UNION ALL
-		    SELECT CAST(crossing.osm_id AS varchar(75)) AS id, crossing.osm_geom, 'crossing' AS label FROM jolie_conflation_bel1.crossing crossing
+		    SELECT CAST(crossing.osm_id AS varchar(75)) AS id, crossing.osm_geom, 'crossing' AS label FROM jolie_bel1.confation_crossing crossing
 		    UNION ALL
-		    SELECT CAST(edge.osm_id AS varchar(75)) AS id, edge.osm_geom, 'edge' AS label FROM jolie_conflation_bel1.sw_edges edge
+		    SELECT CAST(edge.osm_id AS varchar(75)) AS id, edge.osm_geom, 'edge' AS label FROM jolie_bel1.confation_sw_edges edge
 		    UNION ALL
-	    	SELECT CAST(entrance.osm_id AS varchar(75)) AS id, entrance.osm_geom, 'entrance' AS label FROM jolie_conflation_bel1.entrances entrance
+	    	SELECT CAST(entrance.osm_id AS varchar(75)) AS id, entrance.osm_geom, 'entrance' AS label FROM jolie_bel1.confation_entrances entrance
 		    )
 	SELECT sw.osm_id, sw.geom
 	FROM jolie_bel1.osm_sw sw
@@ -417,7 +403,7 @@ INSERT INTO temp_weird_case_sw (osm_id, segment_number, osm_geom, arnold_objecti
 -- it will look at segments that are not conflated, uptil the first segment that intersects with the link
 --SELECT DISTINCT seg.osm_id, seg.segment_number
 --FROM jolie_bel1.weird_case_seg seg
---JOIN jolie_conflation_bel1.connlink link ON ST_Intersects(link.osm_geom, seg.geom)
+--JOIN jolie_bel1.confation_connlink link ON ST_Intersects(link.osm_geom, seg.geom)
 --WHERE (seg.osm_id, seg.segment_number) NOT IN (
 --		SELECT osm_id, segment_number
 --		FROM temp_weird_case_sw
