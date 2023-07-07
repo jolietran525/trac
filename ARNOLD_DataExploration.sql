@@ -10,12 +10,19 @@ CREATE TABLE arnold.wapr_linestring (
   beginmeasure FLOAT8,
   endmeasure FLOAT8,
   shape_length FLOAT8,
-  geom geometry(linestring, 3857)
+  geom geometry(linestring, 3857),
+  shape geometry(multilinestringm, 3857)
 );
 
 -- Step 2: Convert the MultiLineString geometries into LineString geometries
-INSERT INTO arnold.wapr_linestring (og_objectid, routeid, beginmeasure, endmeasure, shape_length, geom)
-SELECT objectid, routeid, beginmeasure, endmeasure, shape_length, ST_Force2D((ST_Dump(shape)).geom)::geometry(linestring, 3857)
+INSERT INTO arnold.wapr_linestring (og_objectid, routeid, beginmeasure, endmeasure, shape_length, geom, shape)
+SELECT  objectid,
+		routeid,
+		beginmeasure, 
+		endmeasure, 
+		shape_length, 
+		ST_Force2D((ST_Dump(shape)).geom)::geometry(linestring, 3857),
+		shape
 FROM arnold.wapr_hpms_submittal;
 
 select count(*)
