@@ -354,6 +354,20 @@ CREATE TABLE jolie_uni2.weird_case_seg AS
 	SELECT * FROM segments WHERE geom IS NOT NULL;
 
 
+
+---- STEP 1: deal with link ----
+CREATE TEMP TABLE temp_weird_case_connlink AS
+	WITH connlink_rn AS 
+		(SELECT DISTINCT ON (link.osm_id, link.segment_number, crossing.arnold_objectid)  link.osm_id AS osm_id, link.segment_number, crossing.arnold_objectid AS arnold_objectid, link.geom AS osm_geom, crossing.osm_geom AS cross_geom
+	    FROM jolie_uni2.confation_crossing crossing
+	    JOIN jolie_uni2.weird_case_seg link
+	    ON ST_Intersects(crossing.osm_geom, st_startpoint(link.geom)) OR ST_Intersects(crossing.osm_geom, st_endpoint(link.geom))
+	    WHERE ST_length(link.geom) < 12)
+	SELECT osm_id, segment_number, ROW_NUMBER() OVER (PARTITION BY osm_id ORDER BY arnold_objectid) AS road_num, arnold_objectid, osm_geom
+	FROM connlink_rn  -- 2
+
+
+DROP TABLE temp_weird_case_sw
 CREATE TEMPORARY TABLE temp_weird_case_sw AS
 	WITH ranked_roads AS (
 		SELECT
@@ -378,7 +392,8 @@ CREATE TEMPORARY TABLE temp_weird_case_sw AS
 		  (  ABS(DEGREES(ST_Angle(ST_LineSubstring( big_road.geom, LEAST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))), GREATEST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))) ), sidewalk.geom))) BETWEEN 0 AND 10 -- 0 
 			 OR ABS(DEGREES(ST_Angle(ST_LineSubstring( big_road.geom, LEAST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))), GREATEST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))) ), sidewalk.geom))) BETWEEN 170 AND 190 -- 180
 			 OR ABS(DEGREES(ST_Angle(ST_LineSubstring( big_road.geom, LEAST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))), GREATEST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))) ), sidewalk.geom))) BETWEEN 350 AND 360 ) -- 360
-	    )
+	      AND sidewalk.osm_id NOT IN (SELECT osm_id FROM temp_weird_case_connlink)
+			 )
 	SELECT
 		  osm_id,
 		  segment_number,
@@ -389,10 +404,11 @@ CREATE TEMPORARY TABLE temp_weird_case_sw AS
 		  ranked_roads
 	WHERE
 		  rank = 1
-	ORDER BY osm_id, segment_number;
+	ORDER BY osm_id, segment_number; --51
 
 SELECT * FROM temp_weird_case_sw
 ORDER BY osm_id, segment_number
+
 
 SELECT * FROM jolie_uni2.arnold_roads ar 
 
@@ -411,7 +427,7 @@ INSERT INTO temp_weird_case_sw (osm_id, segment_number, osm_geom, arnold_objecti
 		  		SELECT osm_id, segment_number
 		  		FROM temp_weird_case_sw
 		  )
-	ORDER BY seg_sw.osm_id, seg_sw.segment_number;
+	ORDER BY seg_sw.osm_id, seg_sw.segment_number; --11
 
 -- checkpoint
 -- for the case where a osm_id is looking at 2 different arnold_objectid,
