@@ -7,10 +7,7 @@ CREATE TEMPORARY TABLE temp_osm_road AS (
 	WHERE	highway IN ('motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'road', 'residential', 'busway', 'unclassified') AND 
 			way && st_setsrid( st_makebox2d( st_makepoint(-13603442,6043723), st_makepoint(-13602226,6044848)), 3857) );
 		
-<<<<<<< HEAD
-=======
 -- delete osm_lanes table if exist
->>>>>>> 1a00a113560cf3c0fe1010925a800a647653f7b6
 DROP TABLE osm_lanes
 -- In this table, we want to pull out the number of lanes
 CREATE TEMPORARY TABLE osm_lanes AS (
@@ -89,24 +86,20 @@ CREATE TEMPORARY TABLE arnold_osm_road_unfiltered AS
 		  rank = 1;
 
 		 
-<<<<<<< HEAD
-		 
---INSERT INTO arnold_osm_road_unfiltered(objectid, og_objectid, osm_id, name, highway, osm_geom)
---	SELECT DISTINCT arnold_osm.objectid, arnold_osm.og_objectid, lanes.osm_id, lanes.name, lanes.highway, lanes.geom
---	FROM osm_lanes lanes
---	JOIN arnold_osm_road_unfiltered arnold_osm ON lanes.name = arnold_osm.name AND lanes.highway = arnold_osm.highway
---	WHERE lanes.osm_id NOT IN (
---			SELECT osm_id
---			FROM arnold_osm_road_unfiltered
---		)
---	GROUP BY arnold_osm.objectid, arnold_osm.og_objectid, lanes.osm_id, lanes.name, lanes.highway, lanes.geom
-	
-SELECT arnold_osm.objectid, arnold_osm.og_objectid, lanes.osm_id, lanes.name, lanes.highway, lanes.geom
-=======
 -- there will be 		 
 INSERT INTO arnold_osm_road_unfiltered(objectid, og_objectid, osm_id, name, highway, osm_geom)
 	SELECT DISTINCT arnold_osm.objectid, arnold_osm.og_objectid, lanes.osm_id, lanes.name, lanes.highway, lanes.geom
->>>>>>> 1a00a113560cf3c0fe1010925a800a647653f7b6
+	FROM osm_lanes lanes
+	JOIN arnold_osm_road_unfiltered arnold_osm ON lanes.name = arnold_osm.name AND lanes.highway = arnold_osm.highway
+	WHERE lanes.osm_id NOT IN (
+			SELECT osm_id
+			FROM arnold_osm_road_unfiltered
+		)
+	GROUP BY arnold_osm.objectid, arnold_osm.og_objectid, lanes.osm_id, lanes.name, lanes.highway, lanes.geom
+	
+		 
+INSERT INTO arnold_osm_road_unfiltered(objectid, og_objectid, osm_id, name, highway, osm_geom)
+	SELECT DISTINCT arnold_osm.objectid, arnold_osm.og_objectid, lanes.osm_id, lanes.name, lanes.highway, lanes.geom
 	FROM osm_lanes lanes
 	JOIN arnold_osm_road_unfiltered arnold_osm
 	ON lanes.name = arnold_osm.name AND 
@@ -121,6 +114,7 @@ INSERT INTO arnold_osm_road_unfiltered(objectid, og_objectid, osm_id, name, high
 			FROM arnold_osm_road_unfiltered
 		)	
 	GROUP BY arnold_osm.objectid, arnold_osm.og_objectid, lanes.osm_id, lanes.name, lanes.highway, lanes.geom
+	
 
 -- option 1: create a temp table and work from here
 DROP TABLE joined_arnold_osm
