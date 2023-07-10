@@ -1,20 +1,27 @@
 -- testing on bel1
 
+-- first, get the road data from osm
 CREATE TEMPORARY TABLE temp_osm_road AS (
 	SELECT osm_id, highway, name, tags, way AS geom
 	FROM planet_osm_line
 	WHERE	highway IN ('motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'road', 'residential', 'busway', 'unclassified') AND 
 			way && st_setsrid( st_makebox2d( st_makepoint(-13603442,6043723), st_makepoint(-13602226,6044848)), 3857) );
 		
+<<<<<<< HEAD
+=======
+-- delete osm_lanes table if exist
+>>>>>>> 1a00a113560cf3c0fe1010925a800a647653f7b6
 DROP TABLE osm_lanes
--- pull out the number of lanes
+-- In this table, we want to pull out the number of lanes
 CREATE TEMPORARY TABLE osm_lanes AS (
 	SELECT osm_id, name, highway, CAST(tags -> 'lanes' AS int) lanes, geom
 	FROM temp_osm_road
 	WHERE tags ? 'lanes' );
     
     
--- for those that does not have the lanes, inherit the lanes when the end/start point intersect with another end/start point of the osm road
+-- For those that do not have the lanes, if the road seg (with no lanes info) has the end/start point
+-- intersecting with another end/start point of the road seg (with lanes info), and they are parallel to each other,
+-- inherit the lanes info from the existing osm_lanes table 
 INSERT INTO osm_lanes(osm_id, name, highway, lanes, geom)
 	WITH ranked_road AS (
 		SELECT r2.osm_id, r2.name, r2.highway, r1.lanes, r2.geom,
@@ -32,7 +39,7 @@ INSERT INTO osm_lanes(osm_id, name, highway, lanes, geom)
 			OR ST_Intersects(st_endpoint(r1.geom), st_endpoint(r2.geom))
 		WHERE r1.osm_id != r2.osm_id
 			  AND ( -- osm road should be PARALLEL TO the roads that ARE IN the 
-					   ABS(DEGREES(ST_Angle(r1.geom, r2.geom))) BETWEEN 0 AND 10 -- 0 
+				       ABS(DEGREES(ST_Angle(r1.geom, r2.geom))) BETWEEN 0 AND 10 -- 0 
 				    OR ABS(DEGREES(ST_Angle(r1.geom, r2.geom))) BETWEEN 170 AND 190 -- 180
 				    OR ABS(DEGREES(ST_Angle(r1.geom, r2.geom))) BETWEEN 350 AND 360  )  ) -- 360 
 	SELECT osm_id, name, highway, lanes, geom
@@ -40,7 +47,8 @@ INSERT INTO osm_lanes(osm_id, name, highway, lanes, geom)
 	WHERE RANK = 1
 
 
-	
+-- this is the table we are checking if the osm road are the same as the arnold road
+	-- check if they are parallel and the arnold intersects the buffer from the osm road (the buffer size depend on the lanes)
 CREATE TEMPORARY TABLE arnold_osm_road_unfiltered AS 
 	WITH ranked_roads AS (
 		SELECT arnold.objectid, arnold.og_objectid, arnold.geom, osm.osm_id, osm.name, osm.highway, osm.geom AS osm_geom,
@@ -81,6 +89,7 @@ CREATE TEMPORARY TABLE arnold_osm_road_unfiltered AS
 		  rank = 1;
 
 		 
+<<<<<<< HEAD
 		 
 --INSERT INTO arnold_osm_road_unfiltered(objectid, og_objectid, osm_id, name, highway, osm_geom)
 --	SELECT DISTINCT arnold_osm.objectid, arnold_osm.og_objectid, lanes.osm_id, lanes.name, lanes.highway, lanes.geom
@@ -93,6 +102,11 @@ CREATE TEMPORARY TABLE arnold_osm_road_unfiltered AS
 --	GROUP BY arnold_osm.objectid, arnold_osm.og_objectid, lanes.osm_id, lanes.name, lanes.highway, lanes.geom
 	
 SELECT arnold_osm.objectid, arnold_osm.og_objectid, lanes.osm_id, lanes.name, lanes.highway, lanes.geom
+=======
+-- there will be 		 
+INSERT INTO arnold_osm_road_unfiltered(objectid, og_objectid, osm_id, name, highway, osm_geom)
+	SELECT DISTINCT arnold_osm.objectid, arnold_osm.og_objectid, lanes.osm_id, lanes.name, lanes.highway, lanes.geom
+>>>>>>> 1a00a113560cf3c0fe1010925a800a647653f7b6
 	FROM osm_lanes lanes
 	JOIN arnold_osm_road_unfiltered arnold_osm
 	ON lanes.name = arnold_osm.name AND 
