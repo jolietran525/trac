@@ -6,7 +6,6 @@ CREATE TEMPORARY TABLE temp_osm_road AS (
 	WHERE	highway IN ('motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'road', 'residential', 'busway', 'unclassified') AND 
 			way && st_setsrid( st_makebox2d( st_makepoint(-13603442,6043723), st_makepoint(-13602226,6044848)), 3857) );
 		
-
 DROP TABLE osm_lanes
 -- pull out the number of lanes
 CREATE TEMPORARY TABLE osm_lanes AS (
@@ -83,17 +82,31 @@ CREATE TEMPORARY TABLE arnold_osm_road_unfiltered AS
 
 		 
 		 
-INSERT INTO arnold_osm_road_unfiltered(objectid, og_objectid, osm_id, name, highway, osm_geom)
-	SELECT DISTINCT arnold_osm.objectid, arnold_osm.og_objectid, lanes.osm_id, lanes.name, lanes.highway, lanes.geom
+--INSERT INTO arnold_osm_road_unfiltered(objectid, og_objectid, osm_id, name, highway, osm_geom)
+--	SELECT DISTINCT arnold_osm.objectid, arnold_osm.og_objectid, lanes.osm_id, lanes.name, lanes.highway, lanes.geom
+--	FROM osm_lanes lanes
+--	JOIN arnold_osm_road_unfiltered arnold_osm ON lanes.name = arnold_osm.name AND lanes.highway = arnold_osm.highway
+--	WHERE lanes.osm_id NOT IN (
+--			SELECT osm_id
+--			FROM arnold_osm_road_unfiltered
+--		)
+--	GROUP BY arnold_osm.objectid, arnold_osm.og_objectid, lanes.osm_id, lanes.name, lanes.highway, lanes.geom
+	
+SELECT arnold_osm.objectid, arnold_osm.og_objectid, lanes.osm_id, lanes.name, lanes.highway, lanes.geom
 	FROM osm_lanes lanes
-	JOIN arnold_osm_road_unfiltered arnold_osm ON lanes.name = arnold_osm.name AND lanes.highway = arnold_osm.highway
+	JOIN arnold_osm_road_unfiltered arnold_osm
+	ON lanes.name = arnold_osm.name AND 
+		(
+			ST_Intersects(st_startpoint(lanes.geom), st_startpoint(arnold_osm.osm_geom))
+			OR ST_Intersects(st_startpoint(lanes.geom), st_endpoint(arnold_osm.osm_geom))
+			OR ST_Intersects(st_endpoint(lanes.geom), st_startpoint(arnold_osm.osm_geom))
+			OR ST_Intersects(st_endpoint(lanes.geom), st_endpoint(arnold_osm.osm_geom))
+		)
 	WHERE lanes.osm_id NOT IN (
 			SELECT osm_id
 			FROM arnold_osm_road_unfiltered
-		)
+		)	
 	GROUP BY arnold_osm.objectid, arnold_osm.og_objectid, lanes.osm_id, lanes.name, lanes.highway, lanes.geom
-	
-	
 
 -- option 1: create a temp table and work from here
 DROP TABLE joined_arnold_osm
