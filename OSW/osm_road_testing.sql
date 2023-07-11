@@ -36,9 +36,11 @@ INSERT INTO osm_lanes(osm_id, name, highway, lanes, geom)
 			OR ST_Intersects(st_endpoint(r1.geom), st_endpoint(r2.geom))
 		WHERE r1.osm_id != r2.osm_id
 			  AND ( -- osm road should be PARALLEL TO the roads that ARE IN the 
-				       ABS(DEGREES(ST_Angle(r1.geom, r2.geom))) BETWEEN 0 AND 10 -- 0 
+					   ABS(DEGREES(ST_Angle(r1.geom, r2.geom))) BETWEEN 0 AND 10 -- 0 
 				    OR ABS(DEGREES(ST_Angle(r1.geom, r2.geom))) BETWEEN 170 AND 190 -- 180
-				    OR ABS(DEGREES(ST_Angle(r1.geom, r2.geom))) BETWEEN 350 AND 360  )  ) -- 360 
+				    OR ABS(DEGREES(ST_Angle(r1.geom, r2.geom))) BETWEEN 350 AND 360  )   -- 360 
+			 AND r2.osm_id NOT IN (SELECT osm_id FROM osm_lanes)
+		     )
 	SELECT osm_id, name, highway, lanes, geom
 	FROM ranked_road
 	WHERE RANK = 1
@@ -46,7 +48,7 @@ INSERT INTO osm_lanes(osm_id, name, highway, lanes, geom)
 
 -- this is the table we are checking if the osm road are the same as the arnold road
 	-- check if they are parallel and the arnold intersects the buffer from the osm road (the buffer size depend on the lanes)
-CREATE TEMPORARY TABLE arnold_osm_road_unfiltered AS 
+CREATE TEMPORARY TABLE arnold_osm_road AS 
 	WITH ranked_roads AS (
 		SELECT arnold.objectid, arnold.og_objectid, arnold.geom, osm.osm_id, osm.name, osm.highway, osm.geom AS osm_geom,
 			ST_LineSubstring( arnold.geom,
@@ -86,10 +88,10 @@ CREATE TEMPORARY TABLE arnold_osm_road_unfiltered AS
 		  rank = 1;
 
 		 
-INSERT INTO arnold_osm_road_unfiltered(objectid, og_objectid, osm_id, name, highway, osm_geom)
+INSERT INTO arnold_osm_road(objectid, og_objectid, osm_id, name, highway, osm_geom)
 	SELECT DISTINCT arnold_osm.objectid, arnold_osm.og_objectid, lanes.osm_id, lanes.name, lanes.highway, lanes.geom
 	FROM osm_lanes lanes
-	JOIN arnold_osm_road_unfiltered arnold_osm
+	JOIN arnold_osm_road arnold_osm
 	ON lanes.name = arnold_osm.name AND 
 		(
 			ST_Intersects(st_startpoint(lanes.geom), st_startpoint(arnold_osm.osm_geom))
@@ -99,13 +101,13 @@ INSERT INTO arnold_osm_road_unfiltered(objectid, og_objectid, osm_id, name, high
 		)
 	WHERE lanes.osm_id NOT IN (
 			SELECT osm_id
-			FROM arnold_osm_road_unfiltered
+			FROM arnold_osm_road
 		)	
 	GROUP BY arnold_osm.objectid, arnold_osm.og_objectid, lanes.osm_id, lanes.name, lanes.highway, lanes.geom
 
 	
 CREATE TABLE <schema>.arnold_osm_conflated AS
-	SELECT objectid, og_objectid, osm_id, osm_geom FROM arnold_osm_road_unfiltered
+	SELECT objectid, og_objectid, osm_id, osm_geom FROM arnold_osm_road
 
 
 

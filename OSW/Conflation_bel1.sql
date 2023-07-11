@@ -70,7 +70,7 @@ CREATE INDEX arnold_roads_geom ON jolie_bel1.arnold_roads USING GIST (geom);
 CREATE TEMPORARY TABLE temp_osm_road AS (
 	SELECT osm_id, highway, name, tags, way AS geom
 	FROM planet_osm_line
-	WHERE	highway IN ('motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'road', 'residential', 'busway') AND 
+	WHERE	highway IN ('motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'road', 'busway') AND 
 			way && st_setsrid( st_makebox2d( st_makepoint(-13603442,6043723), st_makepoint(-13602226,6044848)), 3857) );
 		
 DROP TABLE osm_lanes
@@ -80,8 +80,10 @@ CREATE TEMPORARY TABLE osm_lanes AS (
 	FROM temp_osm_road
 	WHERE tags ? 'lanes' );
     
+
     
 -- for those that does not have the lanes, inherit the lanes when the end/start point intersect with another end/start point of the osm road
+-- TODO: make a while loop
 INSERT INTO osm_lanes(osm_id, name, highway, lanes, geom)
 	WITH ranked_road AS (
 		SELECT r2.osm_id, r2.name, r2.highway, r1.lanes, r2.geom,
@@ -101,12 +103,14 @@ INSERT INTO osm_lanes(osm_id, name, highway, lanes, geom)
 			  AND ( -- osm road should be PARALLEL TO the roads that ARE IN the 
 					   ABS(DEGREES(ST_Angle(r1.geom, r2.geom))) BETWEEN 0 AND 10 -- 0 
 				    OR ABS(DEGREES(ST_Angle(r1.geom, r2.geom))) BETWEEN 170 AND 190 -- 180
-				    OR ABS(DEGREES(ST_Angle(r1.geom, r2.geom))) BETWEEN 350 AND 360  )  ) -- 360 
+				    OR ABS(DEGREES(ST_Angle(r1.geom, r2.geom))) BETWEEN 350 AND 360  )   -- 360 
+			 AND r2.osm_id NOT IN (SELECT osm_id FROM osm_lanes)
+		     )
 	SELECT osm_id, name, highway, lanes, geom
 	FROM ranked_road
 	WHERE RANK = 1
 
-
+	
 	
 CREATE TEMPORARY TABLE arnold_osm_road AS 
 	WITH ranked_roads AS (
@@ -147,8 +151,7 @@ CREATE TEMPORARY TABLE arnold_osm_road AS
 	WHERE
 		  rank = 1;
 
-		 
-		 
+
 INSERT INTO arnold_osm_road(objectid, og_objectid, osm_id, name, highway, osm_geom)
 	SELECT DISTINCT arnold_osm.objectid, arnold_osm.og_objectid, lanes.osm_id, lanes.name, lanes.highway, lanes.geom
 	FROM osm_lanes lanes
@@ -160,28 +163,9 @@ INSERT INTO arnold_osm_road(objectid, og_objectid, osm_id, name, highway, osm_ge
 	GROUP BY arnold_osm.objectid, arnold_osm.og_objectid, lanes.osm_id, lanes.name, lanes.highway, lanes.geom
 	
 	
--- option 1: create a temp table and work from here
-DROP TABLE joined_arnold_osm
-CREATE TEMPORARY TABLE joined_arnold_osm AS 
-	SELECT arnold.objectid, arnold.og_objectid, arnold.geom, arnold_osm.osm_geom
-	FROM jolie_bel1.arnold_roads arnold
-	LEFT JOIN (	SELECT objectid, og_objectid, st_linemerge(ST_union(osm_geom)) osm_geom
-				FROM arnold_osm_road
-				GROUP BY objectid, og_objectid  ) arnold_osm
-	ON arnold.objectid = arnold_osm.objectid
+CREATE TABLE jolie_bel1.arnold_osm_conflated AS
+	SELECT objectid, og_objectid, osm_id, osm_geom FROM arnold_osm_road
 
-
--- option 2: add another column in our arnold
-ALTER TABLE jolie_bel1.arnold_roads ADD COLUMN alt_osm_geom GEOMETRY(geometry, 3857);
--- Update the new column with the query result
-UPDATE jolie_bel1.arnold_roads
-SET alt_osm_geom = arnold_osm.osm_geom
-FROM (
-    SELECT objectid, og_objectid, ST_LineMerge(ST_Union(osm_geom)) AS osm_geom
-    FROM arnold_osm_road
-    GROUP BY objectid, og_objectid
-) AS arnold_osm
-WHERE jolie_bel1.arnold_roads.objectid = arnold_osm.objectid;
 
 
 --------------------------------------------
@@ -196,11 +180,24 @@ WHERE jolie_bel1.arnold_roads.objectid = arnold_osm.objectid;
 SELECT crossing.osm_id, crossing.geom
 FROM jolie_bel1.osm_crossing crossing -- 114
 
-CREATE TABLE jolie_bel1.confation_crossing (osm_id, arnold_objectid, osm_geom) AS
-	SELECT crossing.osm_id AS osm_id, road.og_objectid AS arnold_objectid, crossing.geom AS osm_geom
+
+CREATE TABLE jolie_bel1.confation_crossing (osm_id, road_num, arnold_objectid, osm_geom) AS
+	SELECT DISTINCT ON (crossing.osm_id, road.og_objectid) crossing.osm_id AS osm_id, ROW_NUMBER() OVER (PARTITION BY crossing.osm_id ORDER BY road.og_objectid) AS road_num, road.og_objectid AS arnold_objectid, crossing.geom AS osm_geom
 	FROM jolie_bel1.osm_crossing crossing
 	JOIN jolie_bel1.arnold_roads road
 	ON ST_Intersects(crossing.geom, road.geom) -- 55 crossing have road associated TO it
+	
+
+INSERT INTO jolie_bel1.confation_crossing (osm_id, road_num, arnold_objectid, osm_geom)
+	SELECT DISTINCT ON (crossing.osm_id, road.og_objectid) crossing.osm_id AS osm_id, ROW_NUMBER() OVER (PARTITION BY crossing.osm_id ORDER BY road.og_objectid) AS road_num, road.og_objectid AS arnold_objectid, crossing.geom AS osm_geom
+	FROM jolie_bel1.osm_crossing crossing
+	JOIN jolie_bel1.arnold_osm_conflated road
+	ON ST_Intersects(crossing.geom, road.osm_geom)
+	WHERE crossing.osm_id NOT IN (
+			SELECT osm_id
+			FROM jolie_bel1.confation_crossing
+	)
+
 
 ---- STEP 2: Dealing with entrances
 	-- assumption: entrances are small footway=sidewalk segments that intersect with a point that have a tag of entrance=*
@@ -231,27 +228,27 @@ CREATE TABLE jolie_bel1.confation_connlink (
 
 -- check point: segments (footway=sidewalk) intersects crossing (conlfated)
 INSERT INTO jolie_bel1.confation_connlink (osm_id, road_num, arnold_objectid, osm_geom)
-	SELECT link.osm_id AS osm_id, ROW_NUMBER() OVER (PARTITION BY link.osm_id ORDER BY crossing.arnold_objectid) AS road_num, crossing.arnold_objectid AS arnold_objectid, link.geom AS osm_geom
+	SELECT DISTINCT ON (link.osm_id, crossing.arnold_objectid) link.osm_id AS osm_id, ROW_NUMBER() OVER (PARTITION BY link.osm_id ORDER BY crossing.arnold_objectid) AS road_num, crossing.arnold_objectid AS arnold_objectid, link.geom AS osm_geom
     FROM jolie_bel1.confation_crossing crossing
     JOIN jolie_bel1.osm_sw link
     ON ST_Intersects(crossing.osm_geom, st_startpoint(link.geom)) OR ST_Intersects(crossing.osm_geom, st_endpoint(link.geom))
-    WHERE ST_length(link.geom) < 12
+    WHERE ST_length(link.geom) < 12 --2
 
 
 -- STEP 3.2: deal with link that are not tagged as sidewalk/crossing
 
 -- check point: how highway=footway and footway IS NULL vs crossing (conflated) are connected?
 INSERT INTO jolie_bel1.confation_connlink (osm_id, road_num, arnold_objectid, osm_geom)
-	SELECT link.osm_id AS link_id, ROW_NUMBER() OVER (PARTITION BY link.osm_id ORDER BY crossing.arnold_objectid) AS road_num, crossing.arnold_objectid AS arnold_objectid, link.geom AS link_geom
+	SELECT DISTINCT ON (link.osm_id, crossing.arnold_objectid) link.osm_id AS link_id, ROW_NUMBER() OVER (PARTITION BY link.osm_id ORDER BY crossing.arnold_objectid) AS road_num, crossing.arnold_objectid AS arnold_objectid, link.geom AS link_geom
 		FROM jolie_bel1.osm_footway_null link
 		JOIN jolie_bel1.confation_crossing crossing
 		ON ST_Intersects(link.geom, crossing.osm_geom)  
 		WHERE ST_Length(link.geom) < 12
-		ORDER BY link.osm_id; -- 86
+		ORDER BY link.osm_id; -- 90
 
 
-SELECT DISTINCT osm_id
-FROM jolie_bel1.confation_connlink -- DISTINCT 80
+SELECT DISTINCT  osm_id
+FROM jolie_bel1.confation_connlink -- DISTINCT 83
 
 
 ---- STEP 3.3: Give a table that include all connlink regardless of it conflated to the road or not
@@ -261,11 +258,13 @@ JOIN jolie_bel1.osm_sw link ON ST_Intersects(crossing.geom, link.geom)
 WHERE ST_Length(link.geom) < 12
 ORDER BY link.osm_id --43
 
+
 SELECT link.osm_id AS link_osm_id, ROW_NUMBER() OVER (PARTITION BY link.osm_id ORDER BY crossing.osm_id) AS road_num, crossing.osm_id AS cross_osm_id, link.geom AS link_geom, crossing.geom AS cross_geom
 FROM jolie_bel1.osm_crossing crossing
 JOIN jolie_bel1.osm_footway_null link ON ST_Intersects(crossing.geom, link.geom)
 WHERE ST_Length(link.geom) < 12
 ORDER BY link.osm_id -- 103
+
 
 CREATE TABLE jolie_bel1.osm_connlink_all AS
   (	SELECT DISTINCT link.osm_id AS link_osm_id, 'footway=sidewalk' AS label, link.geom AS link_geom
@@ -290,42 +289,42 @@ CREATE TABLE jolie_bel1.osm_connlink_all AS
 -- 4. Ignore those roads that are already entrance, connlink table
 
 CREATE TABLE jolie_bel1.confation_sidewalk AS
-WITH ranked_roads AS (
+	WITH ranked_roads AS (
+		SELECT
+		  sidewalk.osm_id AS osm_id,
+		  big_road.og_objectid AS arnold_objectid,
+		  sidewalk.geom AS osm_geom,
+		  ST_LineSubstring( big_road.geom, LEAST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))), GREATEST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))) ) AS seg_geom,
+		  -- rank this based on the distance of the midpoint of the sidewalk to the midpoint of the road
+		  ROW_NUMBER() OVER (
+		  	PARTITION BY sidewalk.geom
+		  	ORDER BY ST_distance( 
+		  				ST_LineSubstring( big_road.geom,
+		  								  LEAST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))),
+		  								  GREATEST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))) ),
+		  				sidewalk.geom )
+		  	) AS RANK
+		FROM jolie_bel1.osm_sw sidewalk
+		JOIN jolie_bel1.arnold_roads big_road ON ST_Intersects(ST_Buffer(sidewalk.geom, 5), ST_Buffer(big_road.geom, 18))
+		WHERE 
+		  (  ABS(DEGREES(ST_Angle(ST_LineSubstring( big_road.geom, LEAST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))), GREATEST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))) ), sidewalk.geom))) BETWEEN 0 AND 10 -- 0 
+			 OR ABS(DEGREES(ST_Angle(ST_LineSubstring( big_road.geom, LEAST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))), GREATEST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))) ), sidewalk.geom))) BETWEEN 170 AND 190 -- 180
+			 OR ABS(DEGREES(ST_Angle(ST_LineSubstring( big_road.geom, LEAST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))), GREATEST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))) ), sidewalk.geom))) BETWEEN 350 AND 360 ) -- 360
+	    )
 	SELECT
-	  sidewalk.osm_id AS osm_id,
-	  big_road.og_objectid AS arnold_objectid,
-	  sidewalk.geom AS osm_geom,
-	  ST_LineSubstring( big_road.geom, LEAST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))), GREATEST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))) ) AS seg_geom,
-	  -- rank this based on the distance of the midpoint of the sidewalk to the midpoint of the road
-	  ROW_NUMBER() OVER (
-	  	PARTITION BY sidewalk.geom
-	  	ORDER BY ST_distance( 
-	  				ST_LineSubstring( big_road.geom,
-	  								  LEAST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))),
-	  								  GREATEST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))) ),
-	  				sidewalk.geom )
-	  	) AS RANK
-	FROM jolie_bel1.osm_sw sidewalk
-	JOIN jolie_bel1.arnold_roads big_road ON ST_Intersects(ST_Buffer(sidewalk.geom, 5), ST_Buffer(big_road.geom, 18))
-	WHERE 
-	  (  ABS(DEGREES(ST_Angle(ST_LineSubstring( big_road.geom, LEAST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))), GREATEST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))) ), sidewalk.geom))) BETWEEN 0 AND 10 -- 0 
-		 OR ABS(DEGREES(ST_Angle(ST_LineSubstring( big_road.geom, LEAST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))), GREATEST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))) ), sidewalk.geom))) BETWEEN 170 AND 190 -- 180
-		 OR ABS(DEGREES(ST_Angle(ST_LineSubstring( big_road.geom, LEAST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))), GREATEST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))) ), sidewalk.geom))) BETWEEN 350 AND 360 ) -- 360
-    )
-SELECT
-	  osm_id,
-	  arnold_objectid,
-	  osm_geom,
-	  seg_geom AS arnold_geom
-FROM
-	  ranked_roads
-WHERE
-	  rank = 1
-	  AND ( osm_id NOT IN (
- 				SELECT link.osm_id FROM jolie_bel1.confation_connlink link 
-			    UNION ALL
-			    SELECT entrance.osm_id FROM jolie_bel1.confation_entrances entrance)	
- 	      ); -- 182
+		  osm_id,
+		  arnold_objectid,
+		  osm_geom,
+		  seg_geom AS arnold_geom
+	FROM
+		  ranked_roads
+	WHERE
+		  rank = 1
+		  AND ( osm_id NOT IN (
+	 				SELECT link.osm_id FROM jolie_bel1.confation_connlink link 
+				    UNION ALL
+				    SELECT entrance.osm_id FROM jolie_bel1.confation_entrances entrance)	
+	 	      ); -- 182
 	 
 
 CREATE INDEX sidwalk_sidwalk_geom ON jolie_bel1.confation_sidewalk USING GIST (osm_geom);
@@ -335,17 +334,12 @@ CREATE INDEX sidwalk_arnold_geom ON jolie_bel1.confation_sidewalk USING GIST (ar
 
 ---- STEP 5: Dealing with edges
 	-- assumption: edge will have it start and end point connectected to sidewalk. We will use the sidewalk table to identify our sidewalk edges
-CREATE TABLE jolie_bel1.confation_sw_edges (
-	osm_id INT8,
-	arnold_objectid1 INT8,
-	arnold_objectid2 INT8,
-	osm_geom GEOMETRY(LineString, 3857) )
 
 
-INSERT INTO jolie_bel1.confation_sw_edges (osm_id, arnold_objectid1, arnold_objectid2, osm_geom)
+CREATE TABLE jolie_bel1.confation_sw_edges (osm_id, arnold_objectid1, arnold_objectid2, osm_geom) AS
 	SELECT  edge.osm_id AS osm_id,
 			centerline1.arnold_objectid AS arnold_objectid1,
-			centerline1.arnold_objectid AS arnold_objectid2,
+			centerline2.arnold_objectid AS arnold_objectid2,
 			edge.geom AS osm_geom
 	FROM jolie_bel1.osm_sw edge
 	JOIN jolie_bel1.confation_sidewalk centerline1 ON st_intersects(st_startpoint(edge.geom), centerline1.osm_geom)
@@ -364,41 +358,42 @@ INSERT INTO jolie_bel1.confation_sw_edges (osm_id, arnold_objectid1, arnold_obje
 
 -- conflate into sidewalk if the segment is parallel to the sw, and have it end/start point intersect with another end/start point of the sidewalk
 -- and the arnold_objectid of the conflated sidewalk must be the same as the road's og_objectid where the segment is looking at
+
 INSERT INTO jolie_bel1.confation_sidewalk(osm_id, arnold_objectid, osm_geom, arnold_geom)
-WITH ranked_road AS (
-	SELECT DISTINCT osm_sw.osm_id, sidewalk.arnold_objectid, osm_sw.geom AS osm_geom,
-		            ST_LineSubstring( big_road.geom, LEAST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(osm_sw.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(osm_sw.geom), big_road.geom))), GREATEST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(osm_sw.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(osm_sw.geom), big_road.geom))) ) AS seg_geom,
-					  -- rank this based on the distance of the midpoint of the sidewalk to the midpoint of the road
-					  ROW_NUMBER() OVER (
-					  	PARTITION BY osm_sw.geom
-					  	ORDER BY ST_distance( 
-					  				ST_LineSubstring( big_road.geom,
-					  								  LEAST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(osm_sw.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(osm_sw.geom), big_road.geom))),
-					  								  GREATEST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(osm_sw.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(osm_sw.geom), big_road.geom))) ),
-					  				osm_sw.geom )
-					  	) AS RANK
-	FROM jolie_bel1.osm_sw
-	JOIN jolie_bel1.confation_sidewalk sidewalk
-	ON 	ST_Intersects(st_startpoint(sidewalk.osm_geom), st_startpoint(osm_sw.geom))
-		OR ST_Intersects(st_startpoint(sidewalk.osm_geom), st_endpoint(osm_sw.geom))
-		OR ST_Intersects(st_endpoint(sidewalk.osm_geom), st_startpoint(osm_sw.geom))
-		OR ST_Intersects(st_endpoint(sidewalk.osm_geom), st_endpoint(osm_sw.geom))
-	JOIN jolie_bel1.arnold_roads big_road
-	ON ST_Intersects(ST_Buffer(osm_sw.geom, 5), ST_Buffer(osm_sw.geom, 18))
-	WHERE osm_sw.geom NOT IN (
-			SELECT sidewalk.osm_geom FROM jolie_bel1.confation_sidewalk sidewalk
-		    UNION ALL
-		    SELECT link.osm_geom FROM jolie_bel1.confation_connlink link 
-		    UNION ALL
-		    SELECT entrance.osm_geom FROM jolie_bel1.confation_entrances entrance
-		    UNION ALL
-		    SELECT edge.osm_geom FROM jolie_bel1.confation_sw_edges edge )
-		  AND ( -- specify that the segment should be PARALLEL TO our conflated sidewalk
-				ABS(DEGREES(ST_Angle(sidewalk.osm_geom, osm_sw.geom))) BETWEEN 0 AND 10 -- 0 
-			    OR ABS(DEGREES(ST_Angle(sidewalk.osm_geom, osm_sw.geom))) BETWEEN 170 AND 190 -- 180
-			    OR ABS(DEGREES(ST_Angle(sidewalk.osm_geom, osm_sw.geom))) BETWEEN 350 AND 360  ) -- 360 
-		 AND big_road.og_objectid = sidewalk.arnold_objectid
-	)
+	WITH ranked_road AS (
+		SELECT DISTINCT osm_sw.osm_id, sidewalk.arnold_objectid, osm_sw.geom AS osm_geom,
+			            ST_LineSubstring( big_road.geom, LEAST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(osm_sw.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(osm_sw.geom), big_road.geom))), GREATEST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(osm_sw.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(osm_sw.geom), big_road.geom))) ) AS seg_geom,
+						  -- rank this based on the distance of the midpoint of the sidewalk to the midpoint of the road
+						  ROW_NUMBER() OVER (
+						  	PARTITION BY osm_sw.geom
+						  	ORDER BY ST_distance( 
+						  				ST_LineSubstring( big_road.geom,
+						  								  LEAST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(osm_sw.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(osm_sw.geom), big_road.geom))),
+						  								  GREATEST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(osm_sw.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(osm_sw.geom), big_road.geom))) ),
+						  				osm_sw.geom )
+						  	) AS RANK
+		FROM jolie_bel1.osm_sw
+		JOIN jolie_bel1.confation_sidewalk sidewalk
+		ON 	ST_Intersects(st_startpoint(sidewalk.osm_geom), st_startpoint(osm_sw.geom))
+			OR ST_Intersects(st_startpoint(sidewalk.osm_geom), st_endpoint(osm_sw.geom))
+			OR ST_Intersects(st_endpoint(sidewalk.osm_geom), st_startpoint(osm_sw.geom))
+			OR ST_Intersects(st_endpoint(sidewalk.osm_geom), st_endpoint(osm_sw.geom))
+		JOIN jolie_bel1.arnold_roads big_road
+		ON ST_Intersects(ST_Buffer(osm_sw.geom, 5), ST_Buffer(osm_sw.geom, 18))
+		WHERE osm_sw.geom NOT IN (
+				SELECT sidewalk.osm_geom FROM jolie_bel1.confation_sidewalk sidewalk
+			    UNION ALL
+			    SELECT link.osm_geom FROM jolie_bel1.confation_connlink link 
+			    UNION ALL
+			    SELECT entrance.osm_geom FROM jolie_bel1.confation_entrances entrance
+			    UNION ALL
+			    SELECT edge.osm_geom FROM jolie_bel1.confation_sw_edges edge )
+			  AND ( -- specify that the segment should be PARALLEL TO our conflated sidewalk
+					ABS(DEGREES(ST_Angle(sidewalk.osm_geom, osm_sw.geom))) BETWEEN 0 AND 20 -- 0 
+				    OR ABS(DEGREES(ST_Angle(sidewalk.osm_geom, osm_sw.geom))) BETWEEN 160 AND 200 -- 180
+				    OR ABS(DEGREES(ST_Angle(sidewalk.osm_geom, osm_sw.geom))) BETWEEN 340 AND 360  ) -- 360 
+			 AND big_road.og_objectid = sidewalk.arnold_objectid
+		)
 	SELECT osm_id, arnold_objectid, osm_geom, seg_geom AS arnold_geom
 	FROM ranked_road
 	WHERE RANK = 1
@@ -460,7 +455,20 @@ CREATE TABLE jolie_bel1.weird_case_seg AS
 	SELECT * FROM segments WHERE geom IS NOT NULL;
 
 
-CREATE TEMPORARY TABLE temp_weird_case_sw AS
+---- STEP 1: deal with link ----
+CREATE TABLE jolie_bel1.weird_case_connlink AS
+	WITH connlink_rn AS 
+		(SELECT DISTINCT ON (link.osm_id, link.segment_number, crossing.arnold_objectid)  link.osm_id AS osm_id, link.segment_number, crossing.arnold_objectid AS arnold_objectid, link.geom AS osm_geom, crossing.osm_geom AS cross_geom
+	    FROM jolie_bel1.confation_crossing crossing
+	    JOIN jolie_bel1.weird_case_seg link
+	    ON ST_Intersects(crossing.osm_geom, st_startpoint(link.geom)) OR ST_Intersects(crossing.osm_geom, st_endpoint(link.geom))
+	    WHERE ST_length(link.geom) < 12)
+	SELECT osm_id, segment_number, ROW_NUMBER() OVER (PARTITION BY osm_id ORDER BY arnold_objectid) AS road_num, arnold_objectid, osm_geom
+	FROM connlink_rn  -- 3
+
+
+-- Step 2: Deal with sidewalk
+CREATE TABLE jolie_bel1.weird_case_sw AS
 	WITH ranked_roads AS (
 		SELECT
 		  sidewalk.osm_id AS osm_id,
@@ -484,7 +492,11 @@ CREATE TEMPORARY TABLE temp_weird_case_sw AS
 		  (  ABS(DEGREES(ST_Angle(ST_LineSubstring( big_road.geom, LEAST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))), GREATEST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))) ), sidewalk.geom))) BETWEEN 0 AND 10 -- 0 
 			 OR ABS(DEGREES(ST_Angle(ST_LineSubstring( big_road.geom, LEAST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))), GREATEST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))) ), sidewalk.geom))) BETWEEN 170 AND 190 -- 180
 			 OR ABS(DEGREES(ST_Angle(ST_LineSubstring( big_road.geom, LEAST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))), GREATEST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))) ), sidewalk.geom))) BETWEEN 350 AND 360 ) -- 360
-	    )
+	      AND (sidewalk.osm_id, sidewalk.segment_number) NOT IN (
+	      		SELECT osm_id, segment_number
+	      		FROM jolie_bel1.weird_case_connlink
+	      )
+		)
 	SELECT
 		  osm_id,
 		  segment_number,
@@ -497,27 +509,135 @@ CREATE TEMPORARY TABLE temp_weird_case_sw AS
 		  rank = 1
 	ORDER BY osm_id, segment_number;
 
-SELECT * FROM temp_weird_case_sw
+
+SELECT * FROM jolie_bel1.weird_case_connlink
+ORDER BY osm_id, segment_number
+
+SELECT * FROM jolie_bel1.weird_case_sw
 ORDER BY osm_id, segment_number
 
 SELECT * FROM jolie_bel1.arnold_roads ar 
 
+
+SELECT sw.osm_id, MIN(sw.segment_number, link.segment_number) AS min_segment, MAX(sw.segment_number, link.segment_number) AS max_segment, sw.arnold_objectid
+	  FROM jolie_bel1.weird_case_sw sw
+	  JOIN jolie_bel1.weird_case_connlink link
+	  ON sw.osm_id = link.osm_id AND sw.arnold_objectid = link.arnold_objectid
+	  GROUP BY osm_id, arnold_objectid
+
+-- if the segment lie between a connlink and a sidewalk of the same osm_id that is looking at the same arnold_objectid,
+-- all the segments in between will be conflated as the sidewalk
+INSERT INTO jolie_bel1.weird_case_sw (osm_id, segment_number, arnold_objectid, osm_geom, arnold_geom)
+	WITH min_max_segments AS (
+		  SELECT sw.osm_id, MIN(LEAST(sw.segment_number, link.segment_number)) AS min_segment, MAX(GREATEST(sw.segment_number, link.segment_number)) AS max_segment, sw.arnold_objectid
+		  FROM jolie_bel1.weird_case_sw sw
+		  JOIN jolie_bel1.weird_case_connlink link
+		  ON sw.osm_id = link.osm_id AND sw.arnold_objectid = link.arnold_objectid
+		  GROUP BY sw.osm_id, sw.arnold_objectid
+		)
+		SELECT seg_sw.osm_id, seg_sw.segment_number,  mms.arnold_objectid, seg_sw.geom,
+			   ST_LineSubstring( big_road.geom, LEAST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(seg_sw.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(seg_sw.geom), big_road.geom))), GREATEST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(seg_sw.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(seg_sw.geom), big_road.geom))) ) AS seg_geom
+		FROM jolie_bel1.weird_case_seg seg_sw
+		JOIN min_max_segments mms ON seg_sw.osm_id = mms.osm_id
+		JOIN jolie_bel1.arnold_roads big_road
+		ON mms.arnold_objectid = big_road.og_objectid
+		WHERE seg_sw.segment_number BETWEEN mms.min_segment AND mms.max_segment
+			  AND (seg_sw.osm_id, seg_sw.segment_number) NOT IN (
+			  		SELECT osm_id, segment_number
+			  		FROM jolie_bel1.weird_case_sw
+			  )
+			  AND (seg_sw.osm_id, seg_sw.segment_number) NOT IN (
+			  		SELECT osm_id, segment_number
+			  		FROM jolie_bel1.weird_case_connlink
+			  )
+		ORDER BY seg_sw.osm_id, seg_sw.segment_number;
+
+
 -- deal with segments that have a segment_number in between the min and max segment_number of the 
-INSERT INTO temp_weird_case_sw (osm_id, segment_number, osm_geom, arnold_objectid)
+INSERT INTO jolie_bel1.weird_case_sw (osm_id, segment_number, arnold_objectid, osm_geom, arnold_geom)
 	WITH min_max_segments AS (
 	  SELECT osm_id, MIN(segment_number) AS min_segment, MAX(segment_number) AS max_segment, arnold_objectid
-	  FROM temp_weird_case_sw
+	  FROM jolie_bel1.weird_case_sw
 	  GROUP BY osm_id, arnold_objectid
 	)
-	SELECT seg_sw.osm_id, seg_sw.segment_number, seg_sw.geom, mms.arnold_objectid
+	SELECT seg_sw.osm_id, seg_sw.segment_number,  mms.arnold_objectid, seg_sw.geom,
+		   ST_LineSubstring( big_road.geom, LEAST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(seg_sw.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(seg_sw.geom), big_road.geom))), GREATEST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(seg_sw.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(seg_sw.geom), big_road.geom))) ) AS seg_geom
 	FROM jolie_bel1.weird_case_seg seg_sw
 	JOIN min_max_segments mms ON seg_sw.osm_id = mms.osm_id
+	JOIN jolie_bel1.arnold_roads big_road
+	ON mms.arnold_objectid = big_road.og_objectid
 	WHERE seg_sw.segment_number BETWEEN mms.min_segment AND mms.max_segment
 		  AND (seg_sw.osm_id, seg_sw.segment_number) NOT IN (
 		  		SELECT osm_id, segment_number
-		  		FROM temp_weird_case_sw
+		  		FROM jolie_bel1.weird_case_sw
+		  )
+		  AND (seg_sw.osm_id, seg_sw.segment_number) NOT IN (
+		  		SELECT osm_id, segment_number
+		  		FROM jolie_bel1.weird_case_connlink
 		  )
 	ORDER BY seg_sw.osm_id, seg_sw.segment_number;
+
+
+-- Step 3: Deal with edge
+CREATE TABLE jolie_bel1.weird_case_edge AS
+	SELECT  edge.osm_id AS osm_id,
+			edge.segment_number AS segment_number,
+			centerline1.arnold_objectid AS arnold_objectid1,
+			centerline2.arnold_objectid AS arnold_objectid2,
+			edge.geom AS osm_geom
+	FROM jolie_bel1.weird_case_seg edge
+	JOIN jolie_bel1.weird_case_sw centerline1 ON st_intersects(st_startpoint(edge.geom), centerline1.osm_geom)
+	JOIN jolie_bel1.weird_case_sw centerline2 ON st_intersects(st_endpoint(edge.geom), centerline2.osm_geom)
+	WHERE   (edge.osm_id, edge.segment_number) NOT IN (
+					SELECT sw.osm_id, sw.segment_number FROM jolie_bel1.weird_case_sw sw
+					UNION ALL 
+					SELECT link.osm_id, link.segment_number FROM jolie_bel1.weird_case_connlink link
+				)
+			AND ST_Equals(centerline1.osm_geom, centerline2.osm_geom) IS FALSE
+			AND centerline1.arnold_objectid != centerline2.arnold_objectid -- 0
+
+			
+			
+-- Step 4: Deal with sidewalk that are parallel to the already conflated sidewalk
+INSERT INTO jolie_bel1.weird_case_sw (osm_id, segment_number,  arnold_objectid, osm_geom, arnold_geom)
+	WITH ranked_road AS (
+		SELECT DISTINCT osm_sw.osm_id, osm_sw.segment_number, sidewalk.arnold_objectid, osm_sw.geom AS osm_geom,
+			            ST_LineSubstring( big_road.geom, LEAST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(osm_sw.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(osm_sw.geom), big_road.geom))), GREATEST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(osm_sw.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(osm_sw.geom), big_road.geom))) ) AS seg_geom,
+						  -- rank this based on the distance of the midpoint of the sidewalk to the midpoint of the road
+						  ROW_NUMBER() OVER (
+						  	PARTITION BY osm_sw.geom
+						  	ORDER BY ST_distance( 
+						  				ST_LineSubstring( big_road.geom,
+						  								  LEAST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(osm_sw.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(osm_sw.geom), big_road.geom))),
+						  								  GREATEST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(osm_sw.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(osm_sw.geom), big_road.geom))) ),
+						  				osm_sw.geom )
+						  	) AS RANK
+		FROM jolie_bel1.weird_case_seg osm_sw
+		JOIN jolie_bel1.weird_case_sw sidewalk
+		ON 	ST_Intersects(st_startpoint(sidewalk.osm_geom), st_startpoint(osm_sw.geom))
+			OR ST_Intersects(st_startpoint(sidewalk.osm_geom), st_endpoint(osm_sw.geom))
+			OR ST_Intersects(st_endpoint(sidewalk.osm_geom), st_startpoint(osm_sw.geom))
+			OR ST_Intersects(st_endpoint(sidewalk.osm_geom), st_endpoint(osm_sw.geom))
+		JOIN jolie_bel1.arnold_roads big_road
+		ON ST_Intersects(ST_Buffer(osm_sw.geom, 5), ST_Buffer(osm_sw.geom, 18))
+		WHERE (osm_sw.osm_id, osm_sw.segment_number) NOT IN (
+					SELECT sw.osm_id, sw.segment_number FROM jolie_bel1.weird_case_sw sw
+					UNION ALL 
+					SELECT link.osm_id, link.segment_number FROM jolie_bel1.weird_case_connlink link
+					UNION ALL 
+					SELECT edge.osm_id, edge.segment_number FROM jolie_bel1.weird_case_edge edge
+				)
+			  AND ( -- specify that the segment should be PARALLEL TO our conflated sidewalk
+					ABS(DEGREES(ST_Angle(sidewalk.osm_geom, osm_sw.geom))) BETWEEN 0 AND 20 -- 0 
+				    OR ABS(DEGREES(ST_Angle(sidewalk.osm_geom, osm_sw.geom))) BETWEEN 160 AND 200 -- 180
+				    OR ABS(DEGREES(ST_Angle(sidewalk.osm_geom, osm_sw.geom))) BETWEEN 340 AND 360  ) -- 360 
+			 AND big_road.og_objectid = sidewalk.arnold_objectid
+		)
+	SELECT osm_id, segment_number, arnold_objectid, osm_geom, seg_geom AS arnold_geom
+	FROM ranked_road
+	WHERE RANK = 1
+
+
 
 -- checkpoint
 -- for the case where a osm_id is looking at 2 different arnold_objectid,
@@ -535,15 +655,13 @@ INSERT INTO temp_weird_case_sw (osm_id, segment_number, osm_geom, arnold_objecti
 
 WITH partial_length AS (
 	  SELECT osm_id, arnold_objectid,  MIN(segment_number) AS min_segment, MAX(segment_number) AS max_segment, SUM(ST_Length(osm_geom)) AS partial_length, st_linemerge(ST_union(osm_geom), TRUE) AS geom
-	  FROM temp_weird_case_sw
+	  FROM jolie_bel1.weird_case_sw
 	  GROUP BY osm_id,  arnold_objectid
 	)
 	SELECT sw.osm_id, pl.min_segment, pl.max_segment, pl.arnold_objectid, pl.geom AS seg_geom, sw.geom AS osm_geom, pl.partial_length/ST_Length(sw.geom) AS percent_conflated
 	FROM jolie_bel1.weird_case sw
 	JOIN partial_length pl ON sw.osm_id = pl.osm_id; 
 
-SELECT  osm_id
-FROM temp_weird_case_sw
 
 
 --WITH conf_seg AS (
