@@ -507,7 +507,7 @@ CREATE TABLE jolie_bel1.weird_case_sw AS
 		  ranked_roads
 	WHERE
 		  rank = 1
-	ORDER BY osm_id, segment_number;
+	ORDER BY osm_id, segment_number; --15
 
 
 SELECT * FROM jolie_bel1.weird_case_connlink
@@ -518,12 +518,6 @@ ORDER BY osm_id, segment_number
 
 SELECT * FROM jolie_bel1.arnold_roads ar 
 
-
-SELECT sw.osm_id, MIN(sw.segment_number, link.segment_number) AS min_segment, MAX(sw.segment_number, link.segment_number) AS max_segment, sw.arnold_objectid
-	  FROM jolie_bel1.weird_case_sw sw
-	  JOIN jolie_bel1.weird_case_connlink link
-	  ON sw.osm_id = link.osm_id AND sw.arnold_objectid = link.arnold_objectid
-	  GROUP BY osm_id, arnold_objectid
 
 -- if the segment lie between a connlink and a sidewalk of the same osm_id that is looking at the same arnold_objectid,
 -- all the segments in between will be conflated as the sidewalk
@@ -550,7 +544,7 @@ INSERT INTO jolie_bel1.weird_case_sw (osm_id, segment_number, arnold_objectid, o
 			  		SELECT osm_id, segment_number
 			  		FROM jolie_bel1.weird_case_connlink
 			  )
-		ORDER BY seg_sw.osm_id, seg_sw.segment_number;
+		ORDER BY seg_sw.osm_id, seg_sw.segment_number; --2
 
 
 -- deal with segments that have a segment_number in between the min and max segment_number of the 
@@ -578,27 +572,7 @@ INSERT INTO jolie_bel1.weird_case_sw (osm_id, segment_number, arnold_objectid, o
 	ORDER BY seg_sw.osm_id, seg_sw.segment_number;
 
 
--- Step 3: Deal with edge
-CREATE TABLE jolie_bel1.weird_case_edge AS
-	SELECT  edge.osm_id AS osm_id,
-			edge.segment_number AS segment_number,
-			centerline1.arnold_objectid AS arnold_objectid1,
-			centerline2.arnold_objectid AS arnold_objectid2,
-			edge.geom AS osm_geom
-	FROM jolie_bel1.weird_case_seg edge
-	JOIN jolie_bel1.weird_case_sw centerline1 ON st_intersects(st_startpoint(edge.geom), centerline1.osm_geom)
-	JOIN jolie_bel1.weird_case_sw centerline2 ON st_intersects(st_endpoint(edge.geom), centerline2.osm_geom)
-	WHERE   (edge.osm_id, edge.segment_number) NOT IN (
-					SELECT sw.osm_id, sw.segment_number FROM jolie_bel1.weird_case_sw sw
-					UNION ALL 
-					SELECT link.osm_id, link.segment_number FROM jolie_bel1.weird_case_connlink link
-				)
-			AND ST_Equals(centerline1.osm_geom, centerline2.osm_geom) IS FALSE
-			AND centerline1.arnold_objectid != centerline2.arnold_objectid -- 0
-
-			
-			
--- Step 4: Deal with sidewalk that are parallel to the already conflated sidewalk
+-- Deal with sidewalk that are parallel to the already conflated sidewalk
 INSERT INTO jolie_bel1.weird_case_sw (osm_id, segment_number,  arnold_objectid, osm_geom, arnold_geom)
 	WITH ranked_road AS (
 		SELECT DISTINCT osm_sw.osm_id, osm_sw.segment_number, sidewalk.arnold_objectid, osm_sw.geom AS osm_geom,
@@ -624,8 +598,6 @@ INSERT INTO jolie_bel1.weird_case_sw (osm_id, segment_number,  arnold_objectid, 
 					SELECT sw.osm_id, sw.segment_number FROM jolie_bel1.weird_case_sw sw
 					UNION ALL 
 					SELECT link.osm_id, link.segment_number FROM jolie_bel1.weird_case_connlink link
-					UNION ALL 
-					SELECT edge.osm_id, edge.segment_number FROM jolie_bel1.weird_case_edge edge
 				)
 			  AND ( -- specify that the segment should be PARALLEL TO our conflated sidewalk
 					ABS(DEGREES(ST_Angle(sidewalk.osm_geom, osm_sw.geom))) BETWEEN 0 AND 20 -- 0 
@@ -636,6 +608,38 @@ INSERT INTO jolie_bel1.weird_case_sw (osm_id, segment_number,  arnold_objectid, 
 	SELECT osm_id, segment_number, arnold_objectid, osm_geom, seg_geom AS arnold_geom
 	FROM ranked_road
 	WHERE RANK = 1
+
+
+-- Step 3: Deal with edge
+CREATE TABLE jolie_bel1.weird_case_edge AS
+	SELECT  edge.osm_id AS osm_id,
+			edge.segment_number AS segment_number,
+			centerline1.arnold_objectid AS arnold_objectid1,
+			centerline2.arnold_objectid AS arnold_objectid2,
+			edge.geom AS osm_geom
+	FROM jolie_bel1.weird_case_seg edge
+	JOIN (	SELECT * 
+			FROM jolie_bel1.weird_case_sw
+			UNION ALL
+			SELECT osm_id, 0 AS segment_number, arnold_objectid, osm_geom, arnold_geom
+			FROM jolie_bel1.confation_sidewalk big_sw
+		 ) centerline1
+		ON st_intersects(st_startpoint(edge.geom), centerline1.osm_geom)
+	JOIN (  SELECT * 
+			FROM jolie_bel1.weird_case_sw
+			UNION ALL
+			SELECT osm_id, 0 AS segment_number, arnold_objectid, osm_geom, arnold_geom
+			FROM jolie_bel1.confation_sidewalk big_sw
+		 ) centerline2
+		ON st_intersects(st_endpoint(edge.geom), centerline2.osm_geom)
+	WHERE   (edge.osm_id, edge.segment_number) NOT IN (
+					SELECT sw.osm_id, sw.segment_number FROM jolie_bel1.weird_case_sw sw
+					UNION ALL 
+					SELECT link.osm_id, link.segment_number FROM jolie_bel1.weird_case_connlink link
+				)
+			AND ST_Equals(centerline1.osm_geom, centerline2.osm_geom) IS FALSE
+			AND centerline1.arnold_objectid != centerline2.arnold_objectid -- 3
+
 
 
 
@@ -651,6 +655,32 @@ INSERT INTO jolie_bel1.weird_case_sw (osm_id, segment_number,  arnold_objectid, 
 --	)
 --ORDER BY seg.osm_id, seg.segment_number
 
+SELECT osm_id, segment_number, 'sidewalk' AS label, osm_geom FROM jolie_bel1.weird_case_sw
+UNION ALL
+SELECT osm_id, segment_number, 'link' AS label, osm_geom FROM jolie_bel1.weird_case_connlink
+UNION ALL
+SELECT osm_id, segment_number, 'edge' AS label, osm_geom FROM jolie_bel1.weird_case_edge
+
+
+
+WITH partial_length AS (
+	  SELECT osm_id,   MIN(segment_number) AS min_segment, MAX(segment_number) AS max_segment, SUM(ST_Length(osm_geom)) AS partial_length, st_linemerge(ST_union(osm_geom), TRUE) AS geom
+	  FROM (SELECT osm_id, segment_number, 'sidewalk' AS label, osm_geom FROM jolie_bel1.weird_case_sw
+			UNION ALL
+			SELECT osm_id, segment_number, 'link' AS label, osm_geom FROM jolie_bel1.weird_case_connlink
+			UNION ALL
+			SELECT osm_id, segment_number, 'edge' AS label, osm_geom FROM jolie_bel1.weird_case_edge
+			) conflated
+	  GROUP BY osm_id
+	)
+	SELECT sw.osm_id, pl.min_segment, pl.max_segment, pl.geom AS seg_geom, sw.geom AS osm_geom, pl.partial_length/ST_Length(sw.geom) AS percent_conflated
+	FROM jolie_bel1.weird_case sw
+	JOIN partial_length pl ON sw.osm_id = pl.osm_id; 
+
+
+SELECT * FROM jolie_bel1.weird_case_seg
+SELECT * FROM jolie_bel1.arnold_roads
+SELECT * FROM jolie_bel1.arnold_osm_conflated
 
 
 WITH partial_length AS (
