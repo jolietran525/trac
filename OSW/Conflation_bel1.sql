@@ -62,6 +62,8 @@ CREATE INDEX footway_null_geom ON jolie_bel1.osm_footway_null USING GIST (geom);
 CREATE INDEX arnold_roads_geom ON jolie_bel1.arnold_roads USING GIST (geom);
 
 
+
+
 --------------------------------------------
 	    /* ALTERNATIVE ROAD */
 --------------------------------------------
@@ -110,7 +112,7 @@ INSERT INTO osm_lanes(osm_id, name, highway, lanes, geom)
 	FROM ranked_road
 	WHERE RANK = 1
 
-	
+
 	
 CREATE TEMPORARY TABLE arnold_osm_road AS 
 	WITH ranked_roads AS (
@@ -162,11 +164,28 @@ INSERT INTO arnold_osm_road(objectid, og_objectid, osm_id, name, highway, osm_ge
 		)
 	GROUP BY arnold_osm.objectid, arnold_osm.og_objectid, lanes.osm_id, lanes.name, lanes.highway, lanes.geom
 	
+INSERT INTO arnold_osm_road(objectid, og_objectid, osm_id, name, highway, osm_geom)
+	SELECT DISTINCT arnold_osm.objectid, arnold_osm.og_objectid, lanes.osm_id, lanes.name, lanes.highway, lanes.geom
+	FROM osm_lanes lanes
+	JOIN arnold_osm_road arnold_osm
+	ON lanes.name = arnold_osm.name AND 
+		(
+			ST_Intersects(st_startpoint(lanes.geom), st_startpoint(arnold_osm.osm_geom))
+			OR ST_Intersects(st_startpoint(lanes.geom), st_endpoint(arnold_osm.osm_geom))
+			OR ST_Intersects(st_endpoint(lanes.geom), st_startpoint(arnold_osm.osm_geom))
+			OR ST_Intersects(st_endpoint(lanes.geom), st_endpoint(arnold_osm.osm_geom))
+		)
+	WHERE lanes.osm_id NOT IN (
+			SELECT osm_id
+			FROM arnold_osm_road
+		)	
+
+	
 	
 CREATE TABLE jolie_bel1.arnold_osm_conflated AS
 	SELECT objectid, og_objectid, osm_id, osm_geom FROM arnold_osm_road
 
-
+SELECT * FROM jolie_bel1.arnold_osm_conflated
 
 --------------------------------------------
 			/* CONFLATION */
@@ -176,9 +195,6 @@ CREATE TABLE jolie_bel1.arnold_osm_conflated AS
 ---- STEP 1: Dealing with crossing
 	-- assumption: all of the crossing are referred to as footway=crossing
 
--- check point: see how many crossing are there 
-SELECT crossing.osm_id, crossing.geom
-FROM jolie_bel1.osm_crossing crossing -- 114
 
 
 CREATE TABLE jolie_bel1.confation_crossing (osm_id, road_num, arnold_objectid, osm_geom) AS
@@ -186,6 +202,7 @@ CREATE TABLE jolie_bel1.confation_crossing (osm_id, road_num, arnold_objectid, o
 	FROM jolie_bel1.osm_crossing crossing
 	JOIN jolie_bel1.arnold_roads road
 	ON ST_Intersects(crossing.geom, road.geom) -- 55 crossing have road associated TO it
+	
 	
 
 INSERT INTO jolie_bel1.confation_crossing (osm_id, road_num, arnold_objectid, osm_geom)
@@ -197,7 +214,10 @@ INSERT INTO jolie_bel1.confation_crossing (osm_id, road_num, arnold_objectid, os
 			SELECT osm_id
 			FROM jolie_bel1.confation_crossing
 	)
-
+	
+	
+	
+SELECT * FROM jolie_bel1.confation_crossing
 
 ---- STEP 2: Dealing with entrances
 	-- assumption: entrances are small footway=sidewalk segments that intersect with a point that have a tag of entrance=*
@@ -242,12 +262,12 @@ INSERT INTO jolie_bel1.confation_connlink (osm_id, road_num, arnold_objectid, os
 	SELECT DISTINCT ON (link.osm_id, crossing.arnold_objectid) link.osm_id AS link_id, ROW_NUMBER() OVER (PARTITION BY link.osm_id ORDER BY crossing.arnold_objectid) AS road_num, crossing.arnold_objectid AS arnold_objectid, link.geom AS link_geom
 		FROM jolie_bel1.osm_footway_null link
 		JOIN jolie_bel1.confation_crossing crossing
-		ON ST_Intersects(link.geom, crossing.osm_geom)  
+		ON ST_Intersects(crossing.osm_geom, st_startpoint(link.geom)) OR ST_Intersects(crossing.osm_geom, st_endpoint(link.geom))  
 		WHERE ST_Length(link.geom) < 12
 		ORDER BY link.osm_id; -- 90
 
 
-SELECT DISTINCT  osm_id
+SELECT *
 FROM jolie_bel1.confation_connlink -- DISTINCT 83
 
 
@@ -353,7 +373,8 @@ CREATE TABLE jolie_bel1.confation_sw_edges (osm_id, arnold_objectid1, arnold_obj
 			AND ST_Equals(centerline1.osm_geom, centerline2.osm_geom) IS FALSE
 			AND centerline1.arnold_objectid != centerline2.arnold_objectid -- 19
 			
-			
+SELECT * FROM jolie_bel1.confation_sw_edges cse 
+
 ---- STEP 6: Dealing with osm_sw that is parallel with a conflated sidewalk
 
 -- conflate into sidewalk if the segment is parallel to the sw, and have it end/start point intersect with another end/start point of the sidewalk
@@ -398,8 +419,25 @@ INSERT INTO jolie_bel1.confation_sidewalk(osm_id, arnold_objectid, osm_geom, arn
 	FROM ranked_road
 	WHERE RANK = 1
 
-			
-			
+-- identify more edge
+INSERT INTO jolie_bel1.confation_sw_edges
+	SELECT  edge.osm_id AS osm_id,
+				centerline1.arnold_objectid AS arnold_objectid1,
+				centerline2.arnold_objectid AS arnold_objectid2,
+				edge.geom AS osm_geom
+		FROM jolie_bel1.osm_sw edge
+		JOIN jolie_bel1.confation_sidewalk centerline1 ON st_intersects(st_startpoint(edge.geom), centerline1.osm_geom)
+		JOIN jolie_bel1.confation_sidewalk centerline2 ON st_intersects(st_endpoint(edge.geom), centerline2.osm_geom)
+		WHERE   edge.geom NOT IN (
+					SELECT sw.osm_geom FROM jolie_bel1.confation_sidewalk sw
+					UNION ALL 
+					SELECT link.osm_geom FROM jolie_bel1.confation_connlink link
+					UNION ALL 
+					SELECT entrance.osm_geom FROM jolie_bel1.confation_entrances entrance
+					UNION ALL 
+					SELECT edge.osm_geom FROM jolie_bel1.confation_sw_edges edge)
+				AND ST_Equals(centerline1.osm_geom, centerline2.osm_geom) IS FALSE
+				AND centerline1.arnold_objectid != centerline2.arnold_objectid	
 
 
 -- checkpoint: see what is there in conflation tables
