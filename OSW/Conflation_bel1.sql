@@ -372,6 +372,16 @@ CREATE TABLE jolie_bel1.confation_sw_edges (osm_id, arnold_objectid1, arnold_obj
 				SELECT entrance.osm_geom FROM jolie_bel1.confation_entrances entrance)
 			AND ST_Equals(centerline1.osm_geom, centerline2.osm_geom) IS FALSE
 			AND centerline1.arnold_objectid != centerline2.arnold_objectid -- 19
+
+-- format the table
+SELECT osm_id, 1 as road_num, arnold_objectid1 as road_id, osm_geom
+FROM jolie_bel1.confation_sw_edges
+WHERE arnold_objectid1 IS NOT NULL
+UNION ALL
+SELECT osm_id, 2 as road_num, arnold_objectid2 as road_id, osm_geom
+FROM jolie_bel1.confation_sw_edges
+WHERE arnold_objectid2 IS NOT NULL;
+
 			
 SELECT * FROM jolie_bel1.confation_sw_edges cse 
 
@@ -379,7 +389,7 @@ SELECT * FROM jolie_bel1.confation_sw_edges cse
 
 -- conflate into sidewalk if the segment is parallel to the sw, and have it end/start point intersect with another end/start point of the sidewalk
 -- and the arnold_objectid of the conflated sidewalk must be the same as the road's og_objectid where the segment is looking at
-
+-- this could be run as a loop
 INSERT INTO jolie_bel1.confation_sidewalk(osm_id, arnold_objectid, osm_geom, arnold_geom)
 	WITH ranked_road AS (
 		SELECT DISTINCT osm_sw.osm_id, sidewalk.arnold_objectid, osm_sw.geom AS osm_geom,
@@ -496,7 +506,7 @@ CREATE TABLE jolie_bel1.weird_case_seg AS
 ---- STEP 1: deal with link ----
 CREATE TABLE jolie_bel1.weird_case_connlink AS
 	WITH connlink_rn AS 
-		(SELECT DISTINCT ON (link.osm_id, link.segment_number, crossing.arnold_objectid)  link.osm_id AS osm_id, link.segment_number, crossing.arnold_objectid AS arnold_objectid, link.geom AS osm_geom, crossing.osm_geom AS cross_geom
+		(SELECT DISTINCT ON (link.osm_id, link.segment_number, crossing.arnold_objectid) link.osm_id AS osm_id, link.segment_number, crossing.arnold_objectid AS arnold_objectid, link.geom AS osm_geom, crossing.osm_geom AS cross_geom
 	    FROM jolie_bel1.confation_crossing crossing
 	    JOIN jolie_bel1.weird_case_seg link
 	    ON ST_Intersects(crossing.osm_geom, st_startpoint(link.geom)) OR ST_Intersects(crossing.osm_geom, st_endpoint(link.geom))
@@ -607,7 +617,7 @@ INSERT INTO jolie_bel1.weird_case_sw (osm_id, segment_number, arnold_objectid, o
 		  		SELECT osm_id, segment_number
 		  		FROM jolie_bel1.weird_case_connlink
 		  )
-	ORDER BY seg_sw.osm_id, seg_sw.segment_number;
+	ORDER BY seg_sw.osm_id, seg_sw.segment_number; --1
 
 
 -- Deal with sidewalk that are parallel to the already conflated sidewalk
@@ -645,7 +655,7 @@ INSERT INTO jolie_bel1.weird_case_sw (osm_id, segment_number,  arnold_objectid, 
 		)
 	SELECT osm_id, segment_number, arnold_objectid, osm_geom, seg_geom AS arnold_geom
 	FROM ranked_road
-	WHERE RANK = 1
+	WHERE RANK = 1 --3
 
 
 -- Step 3: Deal with edge
@@ -713,7 +723,7 @@ WITH partial_length AS (
 	)
 	SELECT sw.osm_id, pl.min_segment, pl.max_segment, pl.geom AS seg_geom, sw.geom AS osm_geom, pl.partial_length/ST_Length(sw.geom) AS percent_conflated
 	FROM jolie_bel1.weird_case sw
-	JOIN partial_length pl ON sw.osm_id = pl.osm_id; 
+	JOIN partial_length pl ON sw.osm_id = pl.osm_id; entr
 
 
 SELECT * FROM jolie_bel1.weird_case_seg

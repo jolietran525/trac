@@ -1,13 +1,12 @@
 -- osm roads with lane information -- temp table only
-CREATE TEMPORARY TABLE temp_osm_road AS (
+CREATE TABLE osm_road AS (
 	SELECT osm_id, highway, name, tags, way AS geom
 	FROM planet_osm_line
 	WHERE	highway IN ('motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'road', 'busway')  ); -- 71930
 		
 	
-DROP TABLE osm_lanes
 -- pull out the number of lanes
-CREATE TEMPORARY TABLE osm_lanes AS (
+CREATE TABLE osm_lanes AS (
 	SELECT osm_id, name, highway, 
 	    (
 	        SELECT SUM(CAST(trim(value) AS INTEGER))
@@ -15,19 +14,18 @@ CREATE TEMPORARY TABLE osm_lanes AS (
 	        WHERE trim(value) <> ''
 	    ) AS lanes,
 	    geom
-	FROM temp_osm_road
+	FROM osm_road
 	WHERE tags ? 'lanes'); --43540
 
 CREATE INDEX osm_lanes_geom ON osm_lanes USING GIST (geom);
 	
 
-CREATE TEMPORARY TABLE osm_lanes_null AS (
+CREATE TABLE osm_lanes_null AS (
 	SELECT osm_id, name, highway, geom
-	FROM temp_osm_road
+	FROM osm_road
 	WHERE tags -> 'lanes' IS NULL ) ;   -- 28390
 
 CREATE INDEX osm_lanes_null_geom ON osm_lanes_null USING GIST (geom);
-
 
 
 -- for those that does not have the lanes, inherit the lanes when the end/start point intersect with another end/start point of the osm road
@@ -55,18 +53,7 @@ INSERT INTO osm_lanes(osm_id, name, highway, lanes, geom)
 	SELECT osm_id, name, highway, lanes, geom
 	FROM ranked_road
 	WHERE RANK = 1;
--- first round:	    3226
--- second round:    1176
--- third round:	     600
--- fourth round:     363
--- fifth round:      241
--- sixth round:	     157
--- seventh round:    122
--- eighth round:      93
--- ninth round:      
--- tenth round:      
--- eleventh round:   
--- twelfth round:    
+
 
 -- procedure attempt
 CREATE OR REPLACE PROCEDURE insert_osm_lanes()
@@ -119,10 +106,72 @@ BEGIN
 END $$;
 
 CALL insert_osm_lanes();
+
+
+
+-- update the number of lanes
+UPDATE osm_lanes
+SET lanes = subquery.updated_lanes
+FROM (
+    SELECT l1.osm_id, l1.name, l1.highway, l1.geom, SUM(l2.lanes) AS updated_lanes
+    FROM osm_lanes l1
+    JOIN osm_lanes l2 ON ST_Intersects(ST_StartPoint(l1.geom), l2.geom) AND ST_Equals(l1.geom, l2.geom) IS FALSE
+    WHERE l1.lanes > 12
+    GROUP BY l2.name, l2.highway, l1.osm_id, l1.name, l1.highway, l1.geom
+) AS subquery
+WHERE osm_lanes.osm_id = subquery.osm_id;
+
+
+
+INSERT INTO osm_lanes(osm_id, name, highway, lanes, geom)
+	SELECT null_lane.osm_id, null_lane.name, null_lane.highway, lanes.max_lane, null_lane.geom
+	FROM osm_lanes_null null_lane
+	JOIN (
+		SELECT name, highway, max(lanes) AS max_lane
+		FROM osm_lanes
+		GROUP BY name, highway
+		) lanes
+	ON null_lane.name = lanes.name AND null_lane.highway = lanes.highway
+	WHERE null_lane.osm_id NOT IN (SELECT osm_id FROM osm_lanes)
 	
-CREATE TEMPORARY TABLE arnold_osm_road AS 
+
+INSERT INTO osm_lanes(osm_id, name, highway, lanes, geom)
+	SELECT lane_null.osm_id, lane_null.name, lane_null.highway, MAX(lane.lanes) , lane_null.geom
+	FROM osm_lanes_null lane_null
+	JOIN osm_lanes lane
+	ON (ST_Intersects(ST_Startpoint(lane_null.geom), lane.geom) OR ST_Intersects(ST_Endpoint(lane_null.geom), lane.geom))
+		AND lane_null.name = lane.name
+	WHERE lane_null.osm_id NOT IN (SELECT osm_id FROM osm_lanes)
+	GROUP BY lane.name, lane_null.osm_id, lane_null.name, lane_null.highway, lane_null.geom
+
+	
+	
+INSERT INTO osm_lanes(osm_id, name, highway, lanes, geom)
+	SELECT lane_null.osm_id, lane_null.name, lane_null.highway, MAX(lane.lanes) , lane_null.geom
+	FROM osm_lanes_null lane_null
+	JOIN osm_lanes lane
+	ON (ST_Intersects(ST_Startpoint(lane_null.geom), lane.geom) OR ST_Intersects(ST_Endpoint(lane_null.geom), lane.geom))
+	WHERE lane_null.osm_id NOT IN (SELECT osm_id FROM osm_lanes)
+	GROUP BY lane.name, lane_null.osm_id, lane_null.name, lane_null.highway, lane_null.geom
+
+
+
+INSERT INTO osm_lanes(osm_id, name, highway, lanes, geom)
+	SELECT null_lane.osm_id, null_lane.name, null_lane.highway, lane.lanes, null_lane.geom
+	FROM osm_lanes_null null_lane
+	JOIN (
+		SELECT highway, CEIL(avg(lanes)) AS lanes
+		FROM osm_lanes
+		GROUP BY highway
+		) lane
+	ON null_lane.highway = lane.highway
+	WHERE osm_id NOT IN (SELECT osm_id FROM osm_lanes)
+
+
+
+CREATE TABLE osm2arnold_road AS 
 	WITH ranked_roads AS (
-		SELECT arnold.objectid, arnold.og_objectid, arnold.geom, osm.osm_id, osm.name, osm.highway, osm.geom AS osm_geom,
+		SELECT arnold.objectid, arnold.og_objectid, arnold.routeid, arnold.beginmeasure, arnold.endmeasure, arnold.geom, osm.osm_id, osm.name, osm.highway, osm.geom AS osm_geom,
 			ST_LineSubstring( arnold.geom,
 		  						LEAST(ST_LineLocatePoint(arnold.geom, ST_ClosestPoint(st_startpoint(osm.geom), arnold.geom)) , ST_LineLocatePoint(arnold.geom, ST_ClosestPoint(st_endpoint(osm.geom), arnold.geom))),
 		  						GREATEST(ST_LineLocatePoint(arnold.geom, ST_ClosestPoint(st_startpoint(osm.geom), arnold.geom)) , ST_LineLocatePoint(arnold.geom, ST_ClosestPoint(st_endpoint(osm.geom), arnold.geom))) ) AS seg_geom,
@@ -135,7 +184,7 @@ CREATE TEMPORARY TABLE arnold_osm_road AS
 		  				osm.geom )
 		  	) AS RANK
 	FROM osm_lanes osm
-	RIGHT JOIN jolie_bel1.arnold_roads arnold
+	RIGHT JOIN arnold.wapr_linestring arnold
 	ON ST_Intersects(ST_buffer(osm.geom, (osm.lanes+1)*4), arnold.geom)
 	WHERE (  ABS(DEGREES(ST_Angle(ST_LineSubstring( arnold.geom,
 		  						LEAST(ST_LineLocatePoint(arnold.geom, ST_ClosestPoint(st_startpoint(osm.geom), arnold.geom)) , ST_LineLocatePoint(arnold.geom, ST_ClosestPoint(st_endpoint(osm.geom), arnold.geom))),
@@ -150,6 +199,9 @@ CREATE TEMPORARY TABLE arnold_osm_road AS
 	SELECT
 		  objectid,
 		  og_objectid,
+		  routeid,
+		  beginmeasure,
+		  endmeasure,
 		  osm_id,
 		  name,
 		  highway,
@@ -160,16 +212,12 @@ CREATE TEMPORARY TABLE arnold_osm_road AS
 		  rank = 1;
 
 
-INSERT INTO arnold_osm_road(objectid, og_objectid, osm_id, name, highway, osm_geom)
+INSERT INTO osm2arnold_road(objectid, og_objectid,  routeid, beginmeasure, endmeasure, osm_id, name, highway, osm_geom)
 	SELECT DISTINCT arnold_osm.objectid, arnold_osm.og_objectid, lanes.osm_id, lanes.name, lanes.highway, lanes.geom
 	FROM osm_lanes lanes
-	JOIN arnold_osm_road arnold_osm ON lanes.name = arnold_osm.name AND lanes.highway = arnold_osm.highway
+	JOIN osm2arnold_road arnold_osm ON lanes.name = arnold_osm.name AND lanes.highway = arnold_osm.highway
 	WHERE lanes.osm_id NOT IN (
 			SELECT osm_id
-			FROM arnold_osm_road
+			FROM osm2arnold_road
 		)
 	GROUP BY arnold_osm.objectid, arnold_osm.og_objectid, lanes.osm_id, lanes.name, lanes.highway, lanes.geom
-	
-	
-CREATE TABLE jolie_bel1.arnold_osm_conflated AS
-	SELECT objectid, og_objectid, osm_id, osm_geom FROM arnold_osm_road
