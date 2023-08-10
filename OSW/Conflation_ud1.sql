@@ -454,24 +454,25 @@ SELECT count(*) FROM jolie_conflation_ud1.connlink --76
 -- and also the sum of the segment and the big_sw should be less than the length of the road that the big_sw correspond to
 
 INSERT INTO jolie_conflation_ud1.big_sw(osm_id, arnold_routeid, arnold_beginmeasure, arnold_endmeasure, osm_geom, arnold_geom)
-SELECT DISTINCT osm_sw.osm_id, big_sw.arnold_routeid, big_sw.arnold_beginmeasure, big_sw.arnold_endmeasure, osm_sw.geom AS osm_geom, big_sw.arnold_geom
+SELECT DISTINCT osm_sw.osm_id, big_sw.arnold_routeid, big_sw.arnold_beginmeasure, big_sw.arnold_endmeasure, osm_sw.geom AS osm_geom, big_sw.osm_geom, big_road.geom
 FROM jolie_ud1.osm_sw
 JOIN jolie_conflation_ud1.big_sw
 ON 	ST_Intersects(st_startpoint(big_sw.osm_geom), st_startpoint(osm_sw.geom))
 	OR ST_Intersects(st_startpoint(big_sw.osm_geom), st_endpoint(osm_sw.geom))
 	OR ST_Intersects(st_endpoint(big_sw.osm_geom), st_startpoint(osm_sw.geom))
 	OR ST_Intersects(st_endpoint(big_sw.osm_geom), st_endpoint(osm_sw.geom))
-WHERE osm_sw.geom NOT IN (
-		SELECT big_sw.osm_geom FROM jolie_conflation_ud1.big_sw big_sw
-	    UNION ALL
-	    SELECT link.osm_geom FROM jolie_conflation_ud1.connlink link 
-	    UNION ALL
-	    SELECT crossing.osm_geom FROM jolie_conflation_ud1.crossing crossing
-	    UNION ALL
-	    SELECT edge.osm_geom FROM jolie_conflation_ud1.sw_edges edge
-	    UNION ALL
-	    SELECT entrance.osm_geom FROM jolie_conflation_ud1.entrances entrance)
-	  AND ( -- specify that the segment should be PARALLEL TO our conflated sidewalk
+join jolie_ud1.arnold_roads big_road on (big_sw.arnold_routeid, big_sw.arnold_beginmeasure, big_sw.arnold_endmeasure) = (big_road.routeid, big_road.beginmeasure, big_road.endmeasure)
+WHERE --osm_sw.geom NOT IN (
+--		SELECT big_sw.osm_geom FROM jolie_conflation_ud1.big_sw big_sw
+--	    UNION ALL
+--	    SELECT link.osm_geom FROM jolie_conflation_ud1.connlink link 
+--	    UNION ALL
+--	    SELECT crossing.osm_geom FROM jolie_conflation_ud1.crossing crossing
+--	    UNION ALL
+--	    SELECT edge.osm_geom FROM jolie_conflation_ud1.sw_edges edge
+--	    UNION ALL
+--	    SELECT entrance.osm_geom FROM jolie_conflation_ud1.entrances entrance) AND
+	    ( -- specify that the segment should be PARALLEL TO our conflated sidewalk
 			ABS(DEGREES(ST_Angle(big_sw.osm_geom, osm_sw.geom))) BETWEEN 0 AND 10 -- 0 
 		    OR ABS(DEGREES(ST_Angle(big_sw.osm_geom, osm_sw.geom))) BETWEEN 170 AND 190 -- 180
 		    OR ABS(DEGREES(ST_Angle(big_sw.osm_geom, osm_sw.geom))) BETWEEN 350 AND 360  ) -- 360  

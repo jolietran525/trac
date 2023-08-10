@@ -314,6 +314,7 @@ CREATE TABLE jolie_bel1.confation_sidewalk AS
 		  sidewalk.osm_id AS osm_id,
 		  big_road.og_objectid AS arnold_objectid,
 		  sidewalk.geom AS osm_geom,
+		  big_road.geom as big_geom,
 		  ST_LineSubstring( big_road.geom, LEAST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))), GREATEST(ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_startpoint(sidewalk.geom), big_road.geom)) , ST_LineLocatePoint(big_road.geom, ST_ClosestPoint(st_endpoint(sidewalk.geom), big_road.geom))) ) AS seg_geom,
 		  -- rank this based on the distance of the midpoint of the sidewalk to the midpoint of the road
 		  ROW_NUMBER() OVER (
@@ -335,6 +336,7 @@ CREATE TABLE jolie_bel1.confation_sidewalk AS
 		  osm_id,
 		  arnold_objectid,
 		  osm_geom,
+		  big_geom,
 		  seg_geom AS arnold_geom
 	FROM
 		  ranked_roads
@@ -360,7 +362,9 @@ CREATE TABLE jolie_bel1.confation_sw_edges (osm_id, arnold_objectid1, arnold_obj
 	SELECT  edge.osm_id AS osm_id,
 			centerline1.arnold_objectid AS arnold_objectid1,
 			centerline2.arnold_objectid AS arnold_objectid2,
-			edge.geom AS osm_geom
+			edge.geom AS osm_geom,
+			centerline1.osm_geom,
+			centerline2.osm_geom
 	FROM jolie_bel1.osm_sw edge
 	JOIN jolie_bel1.confation_sidewalk centerline1 ON st_intersects(st_startpoint(edge.geom), centerline1.osm_geom)
 	JOIN jolie_bel1.confation_sidewalk centerline2 ON st_intersects(st_endpoint(edge.geom), centerline2.osm_geom)
