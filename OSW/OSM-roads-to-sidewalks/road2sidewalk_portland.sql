@@ -46,37 +46,41 @@ CREATE TABLE jolie_portland_1.osm_roads_sidewalk_alt AS
 			ST_Intersects(ST_endpoint(r1.way), ST_startpoint(r2.way))
 	);
 
-		 		 
- 
+
 CREATE TABLE jolie_portland_1.osm_roads AS
 	SELECT DISTINCT og.osm_id, og.highway, og.name, og.tags,
-			CASE
-				WHEN og.tags ? 'lanes'
-					THEN CAST(og.tags -> 'lanes' AS int)
-				WHEN og.tags ? 'lanes' = FALSE AND 
-				    (og.tags ? 'lanes:forward' OR
-					 og.tags ? 'lanes:backward' OR
-					 og.tags ? 'lanes:both_ways')
-					THEN COALESCE(CAST(og.tags -> 'lanes:forward' AS int), 0) + COALESCE(CAST(og.tags -> 'lanes:backward' AS int), 0) + COALESCE(CAST(og.tags -> 'lanes:both_ways' AS int), 0)
-				WHEN og.tags ? 'lanes' = FALSE AND 
-				    (og.tags ? 'lanes:forward' = FALSE AND
-					 og.tags ? 'lanes:backward' = FALSE AND
-					 og.tags ? 'lanes:both_ways' = FALSE)
-					THEN 2
-			END AS lanes,
-			og.way,
-			NULL::bigint AS norm_lanes
-		FROM planet_osm_line og
-		JOIN jolie_portland_1.osm_roads_sidewalk_alt road
-		ON ST_Intersects(road.way, og.way)
-		WHERE og.osm_id NOT IN (SELECT osm_id FROM jolie_portland_1.osm_roads_sidewalk) AND
-			  og.highway NOT IN ('proposed', 'footway', 'cycleway', 'bridleway', 'path', 'steps', 'escalator') AND
-			  og.way && st_setsrid( st_makebox2d( st_makepoint(-13643161,5704871), st_makepoint(-13642214,5705842)), 3857)
-		UNION ALL
-		SELECT *, NULL::bigint AS norm_lanes
-		FROM jolie_portland_1.osm_roads_sidewalk_alt;
+	    CASE
+	        WHEN og.tags ? 'lanes'
+	            THEN CAST(og.tags -> 'lanes' AS int)
+	        WHEN og.tags ? 'lanes' = FALSE AND 
+	            (og.tags ? 'lanes:forward' OR
+	             og.tags ? 'lanes:backward' OR
+	             og.tags ? 'lanes:both_ways')
+	            THEN COALESCE(CAST(og.tags -> 'lanes:forward' AS int), 0) + COALESCE(CAST(og.tags -> 'lanes:backward' AS int), 0) + COALESCE(CAST(og.tags -> 'lanes:both_ways' AS int), 0)
+	        WHEN og.tags ? 'lanes' = FALSE AND 
+	            (og.tags ? 'lanes:forward' = FALSE AND
+	             og.tags ? 'lanes:backward' = FALSE AND
+	             og.tags ? 'lanes:both_ways' = FALSE)
+	            THEN 2
+	    END AS lanes,
+	    og.way,
+	    NULL::bigint AS norm_lanes
+	FROM planet_osm_line og
+	LEFT JOIN jolie_portland_1.osm_roads_sidewalk_alt road_alt
+	    ON ST_Intersects(og.way, road_alt.way) AND
+	       (ST_Intersects(st_startpoint(og.way), road_alt.way) IS FALSE AND ST_Intersects(st_endpoint(og.way), road_alt.way) IS FALSE)
+	LEFT JOIN jolie_portland_1.osm_roads_sidewalk road
+	    ON og.osm_id = road.osm_id
+	WHERE og.osm_id NOT IN (SELECT osm_id FROM jolie_portland_1.osm_roads_sidewalk) AND
+	      ((og.highway = 'service' AND road_alt.way IS NOT NULL) OR
+	      (og.highway NOT IN ('proposed', 'footway', 'cycleway', 'bridleway', 'path', 'steps', 'escalator', 'service', 'track'))) AND
+	      og.way && st_setsrid(st_makebox2d(st_makepoint(-13643161,5704871), st_makepoint(-13642214,5705842)), 3857)
+	UNION ALL
+	SELECT *, NULL::bigint AS norm_lanes
+	FROM jolie_portland_1.osm_roads_sidewalk_alt;
 
 
+ 
 -- update norm_lanes of osm_roads
 UPDATE jolie_portland_1.osm_roads
 	SET norm_lanes = subquery.updated_lanes
@@ -88,7 +92,6 @@ UPDATE jolie_portland_1.osm_roads
 	WHERE (jolie_portland_1.osm_roads.name = subquery.name OR jolie_portland_1.osm_roads.name IS NULL)
 		  AND jolie_portland_1.osm_roads.highway = subquery.highway;
 
-SELECT * FROM jolie_portland_1.osm_roads
 
 
 -- NORMALIZE the number of lanes in the osm_roads_sidewalk_alt
@@ -153,13 +156,14 @@ WHERE wkb_geometry && st_setsrid( st_makebox2d( st_makepoint(-13643161,5704871),
 
 -- DEFINE the intersection as the point where there are at least 3 road sub-seg
 -- First, break the road to smaller segments at every intersections
-CREATE TABLE jolie_portland_1.osm_roads_intersection AS
+
+CREATE TABLE jolie_portland_1.osm_roads_subseg AS
 	WITH intersection_points AS (
 	  SELECT DISTINCT m1.osm_id, (ST_Intersection(m1.way, m2.way)) AS geom
 	  FROM jolie_portland_1.osm_roads m1
 	  JOIN jolie_portland_1.osm_roads m2 ON ST_Intersects(m1.way, m2.way) AND m1.osm_id <> m2.osm_id )
 	SELECT
-	  a.osm_id, ST_Union(b.geom) AS point, ST_Split(a.way, ST_Union(b.geom)) AS way
+	  a.osm_id, (ST_Dump(ST_Split(a.way, ST_Union(b.geom)))).geom AS way
 	FROM
 	  jolie_portland_1.osm_roads AS a
 	JOIN
@@ -168,10 +172,21 @@ CREATE TABLE jolie_portland_1.osm_roads_intersection AS
 	  a.osm_id,
 	  a.way;
 
-SELECT DISTINCT ST_Dump(p1.point) AS point
-FROM jolie_portland_1.osm_roads_intersection p1
-JOIN jolie_portland_1.osm_roads_intersection p2
-ON ST_DWithin(p1.point, p2.point, 0.2)
-WHERE ST_Equals(p1.point, p2.point) IS FALSE
+
+CREATE TABLE jolie_portland_1.osm_intersection AS
+	SELECT DISTINCT (ST_Intersection(m1.way, m2.way)) AS point
+	FROM jolie_portland_1.osm_roads m1
+	JOIN jolie_portland_1.osm_roads m2 ON ST_Intersects(m1.way, m2.way) AND m1.osm_id <> m2.osm_id;
 
 
+SELECT point, ST_UNION(subseg.way)
+FROM jolie_portland_1.osm_intersection point
+JOIN jolie_portland_1.osm_roads_subseg subseg
+ON ST_Intersects(subseg.way, point.point)
+GROUP BY point.point
+HAVING COUNT(subseg.osm_id) >= 3;
+
+
+SELECT wkb_geometry 
+FROM portland.curb_ramps
+WHERE wkb_geometry && st_setsrid( st_makebox2d( st_makepoint(-13643161,5704871), st_makepoint(-13642214,5705842)), 3857);
