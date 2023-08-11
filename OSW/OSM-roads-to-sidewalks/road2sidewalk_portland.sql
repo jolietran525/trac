@@ -126,7 +126,7 @@ CREATE TABLE jolie_portland_1.sidewalk_from_road AS
 	        way
 	FROM jolie_portland_1.osm_roads_sidewalk_alt;
 
-------- CUT THE Sidewalks if it touches the road --------
+------- This is the table with sidewalks --------
 CREATE TABLE jolie_portland_1.sidewalk_raw AS 
 	SELECT osm_id, left_sidewalk AS geom, tags, way
 	FROM jolie_portland_1.sidewalk_from_road
@@ -179,13 +179,16 @@ CREATE TABLE jolie_portland_1.osm_intersection AS
 	JOIN jolie_portland_1.osm_roads m2 ON ST_Intersects(m1.way, m2.way) AND m1.osm_id <> m2.osm_id;
 
 
-SELECT point, ST_UNION(subseg.way)
+-- show all the intersections and the sidewalks
+SELECT point, ST_UNION(subseg.way), 'Intersection' AS label
 FROM jolie_portland_1.osm_intersection point
 JOIN jolie_portland_1.osm_roads_subseg subseg
 ON ST_Intersects(subseg.way, point.point)
 GROUP BY point.point
 HAVING COUNT(subseg.osm_id) >= 3;
-
+UNION ALL 
+SELECT way
+FROM 
 
 SELECT wkb_geometry 
 FROM portland.curb_ramps
