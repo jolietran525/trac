@@ -571,21 +571,36 @@ CREATE TABLE jolie_portland_1.connlink_raw AS (
 	--- b) For endpoints that have one curb, and there is another endpoint within 10m
 	-- draw this using corners, cuz a corner must have 2 endpoints
 	SELECT  
-		    CASE
-				WHEN oldseg = seg_id1
-					THEN  seg_id2
-				WHEN oldseg = seg_id2
-					THEN seg_id1
-			END AS seg_id,
-			CASE
-				WHEN oldseg = seg_id1
-					THEN pt_type2
-				WHEN oldseg = seg_id2
-					THEN pt_type1
-			END AS pt_type, 'yes' AS curb,
+--		    CASE
+--				WHEN oldseg = seg_id1
+--					THEN  seg_id2
+--				WHEN oldseg = seg_id2
+--					THEN seg_id1
+--			END AS seg_id,
+--			CASE
+--				WHEN oldseg = seg_id1
+--					THEN pt_type2
+--				WHEN oldseg = seg_id2
+--					THEN pt_type1
+--			END AS pt_type,
+			oldseg AS seg_id,
+			oldpt AS pt_type,
+			'yes' AS curb,
 			st_translate(conn_link, del_x, del_y) AS conn_link 
 	FROM (
 			SELECT DISTINCT sc.*, epc.seg_id oldseg, epc.pt_type oldpt, epc.end_point pt, epc.sidewalk,
+					CASE
+						WHEN ST_Startpoint(sc.corner) = epc.end_point
+							THEN CAST(ST_X(ST_Endpoint(sc.corner)) - ST_X(ST_Startpoint(sc.corner)) AS DOUBLE PRECISION)
+						WHEN ST_Endpoint(sc.corner) = epc.end_point
+							THEN CAST(ST_X(ST_Startpoint(sc.corner)) - ST_X(ST_Endpoint(sc.corner)) AS DOUBLE PRECISION)
+					END AS del_x,
+					CASE
+						WHEN ST_Startpoint(sc.corner) = epc.end_point
+							THEN CAST(ST_Y(ST_Endpoint(sc.corner)) - ST_Y(ST_Startpoint(sc.corner)) AS DOUBLE PRECISION)
+						WHEN ST_Endpoint(sc.corner) = epc.end_point
+							THEN CAST(ST_Y(ST_Startpoint(sc.corner)) - ST_Y(ST_Endpoint(sc.corner)) AS DOUBLE PRECISION)
+					END AS del_y, 
 					CASE
 						WHEN ST_Startpoint(sc.corner) = epc.end_point
 							THEN CAST(ST_X(ST_Endpoint(sc.corner)) - ST_X(ST_Startpoint(sc.corner)) AS DOUBLE PRECISION)
@@ -671,6 +686,43 @@ CREATE TABLE jolie_portland_1.connlink_raw AS (
 
 SELECT *
 FROM jolie_portland_1.connlink_raw  
+
+
+
+
+
+-- group by intersection point
+WITH connlink1 AS (
+	SELECT *
+	FROM jolie_portland_1.connlink_raw  connlink
+	JOIN (	    SELECT point
+				FROM jolie_portland_1.osm_intersection point
+				JOIN jolie_portland_1.osm_roads_subseg subseg
+				ON ST_Intersects(subseg.way, point.point)
+				GROUP BY point.point
+				HAVING COUNT(subseg.osm_id) >= 3    ) int_pt
+	ON ST_Intersects(ST_Buffer(int_pt.point, 25), st_endpoint(connlink.conn_link)) )
+	, connlink2 AS (
+	SELECT *
+	FROM jolie_portland_1.connlink_raw  connlink
+	JOIN (	    SELECT point
+				FROM jolie_portland_1.osm_intersection point
+				JOIN jolie_portland_1.osm_roads_subseg subseg
+				ON ST_Intersects(subseg.way, point.point)
+				GROUP BY point.point
+				HAVING COUNT(subseg.osm_id) >= 3    ) int_pt
+	ON ST_Intersects(ST_Buffer(int_pt.point, 25), st_endpoint(connlink.conn_link)) )
+SELECT ST_MAKELINE(ST_ENDPOINT(connlink1.conn_link), ST_ENDPOINT(connlink2.conn_link)), connlink1.point, connlink1.conn_link, connlink2.conn_link
+FROM connlink1
+JOIN connlink2
+ON  ST_Equals(connlink1.point, connlink2.point) AND
+	CONCAT(connlink1.seg_id, connlink1.pt_type)!=(CONCAT(connlink2.seg_id, connlink2.pt_type)) AND 
+	FLOOR(connlink1.seg_id) = FLOOR(connlink2.seg_id)
+JOIN jolie_portland_1.osm_roads_sidewalk_alt road_lane
+ON road_lane.osm_id = FLOOR(connlink1.seg_id)
+WHERE ST_DWithin(ST_ENDPOINT(connlink1.conn_link), ST_ENDPOINT(connlink2.conn_link), ((LEAST(road_lane.lanes,road_lane.norm_lanes)*12)+6)/3.281*2)
+
+
 
 
 
