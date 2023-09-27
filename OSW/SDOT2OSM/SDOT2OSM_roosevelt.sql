@@ -9,8 +9,11 @@ CREATE TABLE jolie_sdot2osm_roosevelt.osm_sidewalk AS
 	WHERE   highway='footway' AND tags->'footway'='sidewalk' AND
 			way && st_setsrid( st_makebox2d( st_makepoint(-13616596,6053033), st_makepoint(-13615615,6053724)), 3857); --207
 
+			
 ALTER TABLE jolie_sdot2osm_roosevelt.osm_sidewalk RENAME COLUMN way TO geom;
 CREATE INDEX sw_roosevelt_geom ON jolie_sdot2osm_roosevelt.osm_sidewalk USING GIST (geom);
+
+
 
 -- osm crossing
 CREATE TABLE jolie_sdot2osm_roosevelt.osm_crossing AS
@@ -19,8 +22,12 @@ CREATE TABLE jolie_sdot2osm_roosevelt.osm_crossing AS
 	WHERE   highway='footway' AND tags->'footway'='crossing' AND
 			way && st_setsrid( st_makebox2d( st_makepoint(-13616596,6053033), st_makepoint(-13615615,6053724)), 3857); --810
 
+
+			
 ALTER TABLE jolie_sdot2osm_roosevelt.osm_crossing RENAME COLUMN way TO geom;
 CREATE INDEX crossing_roosevelt_geom ON jolie_sdot2osm_roosevelt.osm_crossing USING GIST (geom);
+
+
 
 -- osm connlink
 CREATE TABLE jolie_sdot2osm_roosevelt.osm_connlink AS
@@ -34,13 +41,16 @@ CREATE TABLE jolie_sdot2osm_roosevelt.osm_connlink AS
 	
 -- sdot sidewalk
 CREATE TABLE jolie_sdot2osm_roosevelt.sdot_sidewalk AS
-	SELECT *, ST_Length(geom) AS length
+	SELECT ogc_fid, objectid, (ST_Dump(wkb_geometry)).geom AS geom, ST_Length(wkb_geometry) AS length
 	FROM sdot.sidewalks
-	WHERE   st_astext(geom) != 'LINESTRING EMPTY'
+	WHERE   st_astext(wkb_geometry) != 'LINESTRING EMPTY'
 			AND surftype != 'UIMPRV'
 			AND sw_width != 0
-			AND geom && st_setsrid( st_makebox2d( st_makepoint(-13616596,6053033), st_makepoint(-13615615,6053724)), 3857); -- 124
+			AND wkb_geometry && st_setsrid( st_makebox2d( st_makepoint(-13616596,6053033), st_makepoint(-13615615,6053724)), 3857); -- 124
 
+
+
+			
 CREATE INDEX sdot_roosevelt_geom ON jolie_sdot2osm_roosevelt.sdot_sidewalk USING GIST (geom);
 
 
@@ -67,6 +77,7 @@ CREATE TABLE jolie_sdot2osm_roosevelt.polygon_osm_break AS
 	WHERE 
 	    geom IS NOT NULL; -- 0
 
+	    
 
 -- conflation
 DROP TABLE jolie_sdot2osm_roosevelt.sdot2osm_sw_raw
