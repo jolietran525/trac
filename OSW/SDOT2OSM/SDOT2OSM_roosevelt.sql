@@ -54,6 +54,9 @@ CREATE TABLE jolie_sdot2osm_roosevelt.sdot_sidewalk AS
 CREATE INDEX sdot_roosevelt_geom ON jolie_sdot2osm_roosevelt.sdot_sidewalk USING GIST (geom);
 
 
+
+
+
 -- check if the osm_sidewalk table has osm_sidewalk drawn as a polygon
 CREATE TABLE jolie_sdot2osm_roosevelt.polygon_osm_break AS
 	WITH segments AS (
@@ -78,6 +81,18 @@ CREATE TABLE jolie_sdot2osm_roosevelt.polygon_osm_break AS
 	    geom IS NOT NULL; -- 0
 
 	    
+
+
+-- FUNCTION
+CREATE OR REPLACE FUNCTION jolie_sdot2osm_roosevelt.f_within_degrees(_rad DOUBLE PRECISION, _thresh int) RETURNS boolean AS $$
+    WITH m AS (SELECT mod(degrees(_rad)::NUMERIC, 180) AS angle)
+        ,a AS (SELECT CASE WHEN m.angle > 90 THEN m.angle - 180 ELSE m.angle END AS angle FROM m)
+    SELECT abs(a.angle) < _thresh FROM a;
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+
+
+
 
 -- conflation
 DROP TABLE jolie_sdot2osm_roosevelt.sdot2osm_sw_raw
@@ -119,19 +134,16 @@ CREATE TABLE jolie_sdot2osm_roosevelt.sdot2osm_sw_raw AS
 		  	) AS RANK
 		FROM jolie_sdot2osm_roosevelt.osm_sidewalk osm
 		JOIN jolie_sdot2osm_roosevelt.sdot_sidewalk sdot
-		ON ST_Intersects(ST_Buffer(sdot.geom, sdot.sw_width/39.37 + 5, 'endcap=flat join=round'), osm.geom)
+		ON ST_Intersects(ST_Buffer(sdot.geom, sdot.sw_width/39.37 + 5, 'endcap=flat join=round'), ST_Buffer(osm.geom, 1))
 		WHERE  osm.osm_id NOT IN (SELECT osm_id FROM jolie_sdot2osm_roosevelt.osm_connlink) AND 
 			   CASE
 				  	WHEN (sdot.length > osm.length*0.85)
-				  		THEN (  ABS(DEGREES(ST_Angle(ST_LineSubstring( sdot.geom, LEAST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))), GREATEST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))) ), osm.geom))) BETWEEN 0 AND 10 -- 0 
-							 OR ABS(DEGREES(ST_Angle(ST_LineSubstring( sdot.geom, LEAST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))), GREATEST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))) ), osm.geom))) BETWEEN 170 AND 190 -- 180
-							 OR ABS(DEGREES(ST_Angle(ST_LineSubstring( sdot.geom, LEAST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))), GREATEST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))) ), osm.geom))) BETWEEN 350 AND 360 ) -- 360
-							 AND ST_Length(ST_LineSubstring( sdot.geom, LEAST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))), GREATEST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))) )) BETWEEN (osm.length*0.75) AND (osm.length*1.25)
+				  		THEN 
+							 jolie_sdot2osm_roosevelt.f_within_degrees(ST_Angle(ST_LineSubstring( sdot.geom, LEAST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))), GREATEST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))) ), osm.geom), 15)
+							 --AND ST_Length(ST_LineSubstring( sdot.geom, LEAST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))), GREATEST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))) )) BETWEEN (osm.length*0.75) AND (osm.length*1.25)
 				  	ELSE -- osm.length > sdot.length
-				  		(   ABS(DEGREES(ST_Angle(ST_LineSubstring( osm.geom, LEAST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom))), GREATEST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom))) ), sdot.geom))) BETWEEN 0 AND 10 -- 0 
-						 OR ABS(DEGREES(ST_Angle(ST_LineSubstring( osm.geom, LEAST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom))), GREATEST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom))) ), sdot.geom))) BETWEEN 170 AND 190 -- 180
-						 OR ABS(DEGREES(ST_Angle(ST_LineSubstring( osm.geom, LEAST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom))), GREATEST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom))) ), sdot.geom))) BETWEEN 350 AND 360 ) -- 360
-						  AND ST_Length(ST_LineSubstring( osm.geom, LEAST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom))), GREATEST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom))) )) BETWEEN ((sdot.length)*0.75) AND ((sdot.length)*1.25)
+						 jolie_sdot2osm_roosevelt.f_within_degrees(ST_Angle(ST_LineSubstring( osm.geom, LEAST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom))), GREATEST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom))) ), sdot.geom), 15) 
+						 --AND ST_Length(ST_LineSubstring( osm.geom, LEAST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom))), GREATEST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom))) )) BETWEEN ((sdot.length)*0.75) AND ((sdot.length)*1.25)
 			   END AND
 			   osm.osm_id NOT IN (SELECT distinct osm_id -- polygon
 			   					  FROM jolie_sdot2osm_roosevelt.polygon_osm_break )
