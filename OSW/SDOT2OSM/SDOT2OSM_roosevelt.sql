@@ -18,11 +18,11 @@ CREATE INDEX sw_roosevelt_geom ON jolie_sdot2osm_roosevelt.osm_sidewalk USING GI
 -- osm crossing
 -- DROP this!!
 --DROP TABLE jolie_sdot2osm_roosevelt.osm_crossing
---CREATE TABLE jolie_sdot2osm_roosevelt.osm_crossing AS
---	SELECT *
---	FROM planet_osm_line pol 
---	WHERE   highway='footway' AND tags->'footway'='crossing' AND
---			way && st_setsrid( st_makebox2d( st_makepoint(-13616596,6053033), st_makepoint(-13615615,6053724)), 3857); --810
+CREATE TABLE jolie_sdot2osm_roosevelt.osm_crossing AS
+	SELECT *
+	FROM planet_osm_line pol 
+	WHERE   highway='footway' AND tags->'footway'='crossing' AND
+			way && st_setsrid( st_makebox2d( st_makepoint(-13616596,6053033), st_makepoint(-13615615,6053724)), 3857); --810
 
 
 -- osm connlink
@@ -38,8 +38,9 @@ CREATE INDEX sw_roosevelt_geom ON jolie_sdot2osm_roosevelt.osm_sidewalk USING GI
 
 	
 -- sdot sidewalk
+DROP TABLE 
 CREATE TABLE jolie_sdot2osm_roosevelt.sdot_sidewalk AS
-	SELECT ogc_fid, objectid, sw_width, surftype, primarycrossslope, (ST_Dump(wkb_geometry)).geom AS geom, ST_Length(wkb_geometry) AS length
+	SELECT ogc_fid, objectid, sw_width, surftype, primarycrossslope, sw_category, (ST_Dump(wkb_geometry)).geom AS geom, ST_Length(wkb_geometry) AS length
 	FROM sdot.sidewalks
 	WHERE   st_astext(wkb_geometry) != 'LINESTRING EMPTY'
 			AND surftype != 'UIMPRV'
@@ -221,7 +222,8 @@ FROM osm_overlapping
 -- the purpose is to clean things up and choose the best segments
 WITH sdot_overlapping AS (
 	SELECT  sw1.*,
-			ST_Length(sw1.osm_seg)/ST_Length(sw1.osm_geom) AS sub_over_whole
+			ST_Length(sw1.osm_seg)/ST_Length(sw1.osm_geom) AS sub_over_whole,
+			ROUND(CAST(LEAST(ST_Length(sw1.osm_seg)/ST_Length(sw1.sdot_geom), ST_Length(sw1.sdot_geom)/ST_Length(sw1.osm_seg)) AS NUMERIC), 1) AS seg_over_conf
 	FROM (
 			SELECT *
 			FROM jolie_sdot2osm_roosevelt.sdot2osm_sw_raw
@@ -235,7 +237,8 @@ WITH sdot_overlapping AS (
 	UNION ALL 
 	
 	SELECT  sw2.*,  
-			ST_Length(sw2.sdot_seg)/ST_Length(sw2.sdot_geom) AS sub_over_whole
+			ST_Length(sw2.sdot_seg)/ST_Length(sw2.sdot_geom) AS sub_over_whole,
+			ROUND(CAST(LEAST(ST_Length(sw2.sdot_seg)/ST_Length(sw2.osm_geom), ST_Length(sw2.osm_geom)/ST_Length(sw2.sdot_seg)) AS numeric), 1) AS seg_over_conf
 	FROM (
 			SELECT *
 			FROM jolie_sdot2osm_roosevelt.sdot2osm_sw_raw
@@ -295,12 +298,13 @@ CREATE TABLE jolie_sdot2osm_roosevelt.sidewalk AS
 	    jolie_sdot2osm_roosevelt.sdot2osm_sw_raw
 	WHERE 
 	    (osm_id, sdot_objectid) NOT IN ( 
-	        SELECT r1.osm_id,
-	        CASE
-	            WHEN ST_Distance(ST_LineInterpolatePoint(r1.osm_seg, 0.5), ST_LineInterpolatePoint(r1.sdot_geom, 0.5)) < ST_Distance(ST_LineInterpolatePoint(r2.osm_seg, 0.5), ST_LineInterpolatePoint(r2.sdot_geom, 0.5))
-	                THEN (r2.sdot_objectid)
-	            ELSE (r1.sdot_objectid)
-	        END AS sdot_objectid
+	        -- If the 
+	    	SELECT 	r1.osm_id,
+			        CASE
+			            WHEN ST_Distance(ST_LineInterpolatePoint(r1.osm_seg, 0.5), ST_LineInterpolatePoint(r1.sdot_geom, 0.5)) < ST_Distance(ST_LineInterpolatePoint(r2.osm_seg, 0.5), ST_LineInterpolatePoint(r2.sdot_geom, 0.5))
+			                THEN (r2.sdot_objectid)
+			            ELSE (r1.sdot_objectid)
+			        END AS sdot_objectid
 	        FROM jolie_sdot2osm_roosevelt.sdot2osm_sw_raw r1
 	        JOIN (
 	            SELECT *
@@ -314,42 +318,46 @@ CREATE TABLE jolie_sdot2osm_roosevelt.sidewalk AS
 	        ON r1.osm_id = r2.osm_id AND r1.sdot_objectid < r2.sdot_objectid
 	        WHERE ST_Length(ST_Intersection(ST_Buffer(r1.osm_seg, 1, 'endcap=flat join=round'), r2.osm_seg))/ST_Length(r1.osm_seg) > 0.8 OR
 	              ST_Length(ST_Intersection(ST_Buffer(r1.osm_seg, 1, 'endcap=flat join=round'), r2.osm_seg))/ST_Length(r2.osm_seg) > 0.8
-	        UNION ALL
-	        SELECT 
-	        CASE
-	            WHEN ST_Distance(ST_LineInterpolatePoint(r1.osm_geom, 0.5), ST_LineInterpolatePoint(r1.sdot_seg, 0.5)) < ST_Distance(ST_LineInterpolatePoint(r2.osm_geom, 0.5), ST_LineInterpolatePoint(r2.sdot_seg, 0.5))
-	                THEN (r2.osm_id)
-	            ELSE (r1.osm_id)
-	        END AS osm_id,
-	        r1.sdot_objectid
-	        FROM jolie_sdot2osm_roosevelt.sdot2osm_sw_raw r1
-	        JOIN (
-	            SELECT *
-	            FROM jolie_sdot2osm_roosevelt.sdot2osm_sw_raw
-	            WHERE sdot_objectid IN (
-	                SELECT sdot_objectid
-	                FROM jolie_sdot2osm_roosevelt.sdot2osm_sw_raw
-	                WHERE sdot_seg IS NOT NULL
-	                GROUP BY sdot_objectid
-	                HAVING count(*) > 1 ) ) r2
-	        ON r1.sdot_objectid = r2.sdot_objectid AND r1.osm_id < r2.osm_id
-	        WHERE ST_Length(ST_Intersection(ST_Buffer(r1.sdot_seg, 1, 'endcap=flat join=round'), r2.sdot_seg))/ST_Length(r1.sdot_seg) > 0.8 OR
-	              ST_Length(ST_Intersection(ST_Buffer(r1.sdot_seg, 1, 'endcap=flat join=round'), r2.sdot_seg))/ST_Length(r2.sdot_seg) > 0.8
-	        UNION ALL 
-	        SELECT osm_id, sdot_objectid 
+	        
+			UNION ALL
+	        
+		    SELECT 
+		        CASE
+		            WHEN ST_Distance(ST_LineInterpolatePoint(r1.osm_geom, 0.5), ST_LineInterpolatePoint(r1.sdot_seg, 0.5)) < ST_Distance(ST_LineInterpolatePoint(r2.osm_geom, 0.5), ST_LineInterpolatePoint(r2.sdot_seg, 0.5))
+		                THEN (r2.osm_id)
+		            ELSE (r1.osm_id)
+		        END AS osm_id,
+		        r1.sdot_objectid
+		    FROM jolie_sdot2osm_roosevelt.sdot2osm_sw_raw r1
+		    JOIN (
+		            SELECT *
+		            FROM jolie_sdot2osm_roosevelt.sdot2osm_sw_raw
+		            WHERE sdot_objectid IN (
+		                SELECT sdot_objectid
+		                FROM jolie_sdot2osm_roosevelt.sdot2osm_sw_raw
+		                WHERE sdot_seg IS NOT NULL
+		                GROUP BY sdot_objectid
+		                HAVING count(*) > 1 ) ) r2
+		    ON r1.sdot_objectid = r2.sdot_objectid AND r1.osm_id < r2.osm_id
+		    WHERE ST_Length(ST_Intersection(ST_Buffer(r1.sdot_seg, 1, 'endcap=flat join=round'), r2.sdot_seg))/ST_Length(r1.sdot_seg) > 0.8 OR
+		          ST_Length(ST_Intersection(ST_Buffer(r1.sdot_seg, 1, 'endcap=flat join=round'), r2.sdot_seg))/ST_Length(r2.sdot_seg) > 0.8
+         
+		    UNION ALL 
+		    
+		    SELECT osm_id, sdot_objectid 
 			FROM jolie_sdot2osm_roosevelt.sdot2osm_sw_raw
 			WHERE osm_id IN (
-				SELECT r1.osm_id
-				FROM jolie_sdot2osm_roosevelt.sdot2osm_sw_raw r1
-				JOIN (
-					SELECT osm_id
-				 	FROM jolie_sdot2osm_roosevelt.sdot2osm_sw_raw
-				 	GROUP BY osm_id
-					HAVING COUNT(*) > 1) r2
-			 	ON r1.osm_id = r2.osm_id
-				WHERE r1.osm_seg IS NULL )
-			    AND osm_seg IS NOT NULL 
-	    );
+					SELECT r1.osm_id
+					FROM jolie_sdot2osm_roosevelt.sdot2osm_sw_raw r1
+					JOIN (
+						SELECT osm_id
+					 	FROM jolie_sdot2osm_roosevelt.sdot2osm_sw_raw
+					 	GROUP BY osm_id
+						HAVING COUNT(*) > 1) r2
+				 	ON r1.osm_id = r2.osm_id
+					WHERE r1.osm_seg IS NULL )
+			      AND osm_seg IS NOT NULL 
+	    	);
 
 
 -- case when the whole osm_geom already conflated, but the there is its sub-seg conflating to another sdot, and it looks weird
@@ -366,6 +374,9 @@ WHERE osm_id IN (
  	ON r1.osm_id = r2.osm_id
 	WHERE r1.osm_seg IS NULL )
     AND osm_seg IS NOT NULL 
+    
+    
+
 
 
 -- case: sdot > osm
@@ -374,12 +385,12 @@ FROM jolie_sdot2osm_roosevelt.sdot2osm_sw_raw
 WHERE sdot_seg IS NOT NULL
 	  AND (osm_id, sdot_objectid) NOT IN ( 
 	  		SELECT 
-			CASE
-				WHEN ST_Distance(ST_LineInterpolatePoint(r1.osm_geom, 0.5), ST_LineInterpolatePoint(r1.sdot_seg, 0.5)) < ST_Distance(ST_LineInterpolatePoint(r2.osm_geom, 0.5), ST_LineInterpolatePoint(r2.sdot_seg, 0.5))
-					THEN (r2.osm_id)
-				ELSE (r1.osm_id)
-			END AS osm_id,
-			r1.sdot_objectid
+				CASE
+					WHEN ST_Distance(ST_LineInterpolatePoint(r1.osm_geom, 0.5), ST_LineInterpolatePoint(r1.sdot_seg, 0.5)) < ST_Distance(ST_LineInterpolatePoint(r2.osm_geom, 0.5), ST_LineInterpolatePoint(r2.sdot_seg, 0.5))
+						THEN (r2.osm_id)
+					ELSE (r1.osm_id)
+				END AS osm_id,
+				r1.sdot_objectid
 			FROM jolie_sdot2osm_roosevelt.sdot2osm_sw_raw r1
 			JOIN (
 				SELECT *
@@ -391,8 +402,7 @@ WHERE sdot_seg IS NOT NULL
 					GROUP BY sdot_objectid
 					HAVING count(*) > 1 ) ) r2
 			ON r1.sdot_objectid = r2.sdot_objectid AND r1.osm_id < r2.osm_id
-			WHERE ST_Length(ST_Intersection(ST_Buffer(r1.sdot_seg, 1, 'endcap=flat join=round'), r2.sdot_seg))/ST_Length(r1.sdot_seg) > 0.8 OR
-				  ST_Length(ST_Intersection(ST_Buffer(r1.sdot_seg, 1, 'endcap=flat join=round'), r2.sdot_seg))/ST_Length(r2.sdot_seg) > 0.8
+			WHERE ST_Length(ST_Intersection(ST_Buffer(r1.sdot_seg, 1, 'endcap=flat join=round'), r2.sdot_seg))/LEAST(ST_Length(r1.sdot_seg),  ST_Length(r2.sdot_seg)) > 0.8
 	  )
 	  	  
 
