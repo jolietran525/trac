@@ -16,32 +16,30 @@ CREATE INDEX sw_roosevelt_geom ON jolie_sdot2osm_roosevelt.osm_sidewalk USING GI
 
 
 -- osm crossing
-CREATE TABLE jolie_sdot2osm_roosevelt.osm_crossing AS
-	SELECT *
-	FROM planet_osm_line pol 
-	WHERE   highway='footway' AND tags->'footway'='crossing' AND
-			way && st_setsrid( st_makebox2d( st_makepoint(-13616596,6053033), st_makepoint(-13615615,6053724)), 3857); --810
-
-
-			
-ALTER TABLE jolie_sdot2osm_roosevelt.osm_crossing RENAME COLUMN way TO geom;
-CREATE INDEX crossing_roosevelt_geom ON jolie_sdot2osm_roosevelt.osm_crossing USING GIST (geom);
-
+-- DROP this!!
+--DROP TABLE jolie_sdot2osm_roosevelt.osm_crossing
+--CREATE TABLE jolie_sdot2osm_roosevelt.osm_crossing AS
+--	SELECT *
+--	FROM planet_osm_line pol 
+--	WHERE   highway='footway' AND tags->'footway'='crossing' AND
+--			way && st_setsrid( st_makebox2d( st_makepoint(-13616596,6053033), st_makepoint(-13615615,6053724)), 3857); --810
 
 
 -- osm connlink
-CREATE TABLE jolie_sdot2osm_roosevelt.osm_connlink AS
-	SELECT sw.*
-	FROM jolie_sdot2osm_roosevelt.osm_crossing crossing
-	JOIN jolie_sdot2osm_roosevelt.osm_sidewalk sw
-	ON ST_Intersects(sw.geom, crossing.geom)
-	WHERE sw.length < 15; -- 97
+-- DROP this, cuz don't need to
+--DROP TABLE jolie_sdot2osm_roosevelt.osm_connlink
+--CREATE TABLE jolie_sdot2osm_roosevelt.osm_connlink AS
+--	SELECT sw.*
+--	FROM jolie_sdot2osm_roosevelt.osm_crossing crossing
+--	JOIN jolie_sdot2osm_roosevelt.osm_sidewalk sw
+--	ON ST_Intersects(st_startpoint(sw.geom), crossing.geom) OR ST_Intersects(st_endpoint(sw.geom), crossing.geom)
+--	WHERE sw.length < 10; -- 67
 	
 
 	
 -- sdot sidewalk
 CREATE TABLE jolie_sdot2osm_roosevelt.sdot_sidewalk AS
-	SELECT ogc_fid, objectid, (ST_Dump(wkb_geometry)).geom AS geom, ST_Length(wkb_geometry) AS length
+	SELECT ogc_fid, objectid, sw_width, surftype, primarycrossslope, (ST_Dump(wkb_geometry)).geom AS geom, ST_Length(wkb_geometry) AS length
 	FROM sdot.sidewalks
 	WHERE   st_astext(wkb_geometry) != 'LINESTRING EMPTY'
 			AND surftype != 'UIMPRV'
@@ -52,7 +50,6 @@ CREATE TABLE jolie_sdot2osm_roosevelt.sdot_sidewalk AS
 
 			
 CREATE INDEX sdot_roosevelt_geom ON jolie_sdot2osm_roosevelt.sdot_sidewalk USING GIST (geom);
-
 
 
 
@@ -107,14 +104,14 @@ CREATE TABLE jolie_sdot2osm_roosevelt.sdot2osm_sw_raw AS
 		  osm.geom AS osm_geom,
 		  sdot.geom AS sdot_geom,
 		  CASE
-				  	WHEN (sdot.length > osm.length*0.85) THEN NULL
-				  	ELSE ST_LineSubstring( osm.geom, LEAST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom))), GREATEST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom))) )
-			  	END AS osm_seg,
+				WHEN (sdot.length > osm.length*0.85) THEN NULL
+				ELSE ST_LineSubstring( osm.geom, LEAST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom))), GREATEST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom))) )
+		  END AS osm_seg,
 		  CASE
-				  	WHEN (sdot.length > osm.length*0.85)
-				  		THEN ST_LineSubstring( sdot.geom, LEAST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))), GREATEST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))) )
-				  	ELSE NULL
-			  	END AS sdot_seg,
+				WHEN (sdot.length > osm.length*0.85)
+					THEN ST_LineSubstring( sdot.geom, LEAST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))), GREATEST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))) )
+				ELSE NULL
+		  END AS sdot_seg,
 		  ROW_NUMBER() OVER (
 		  	PARTITION BY (
 		  		CASE
@@ -126,26 +123,31 @@ CREATE TABLE jolie_sdot2osm_roosevelt.sdot2osm_sw_raw AS
 		  	ORDER BY
 		  		CASE
 				  	WHEN (sdot.length > osm.length*0.85)
-				  		THEN ST_distance(
-				  			ST_LineInterpolatePoint(ST_LineSubstring( sdot.geom, LEAST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))), GREATEST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))) ), 0.5), ST_LineInterpolatePoint(osm.geom, 0.5) )
-				  	ELSE ST_distance(
-				  		ST_LineInterpolatePoint(ST_LineSubstring( osm.geom, LEAST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom))), GREATEST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom)))) , 0.5), ST_LineInterpolatePoint(sdot.geom, 0.5))
-			  	END
-		  	) AS RANK
+				  		THEN --ST_distance(
+				  			--ST_LineInterpolatePoint(ST_LineSubstring( sdot.geom, LEAST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))), GREATEST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))) ), 0.5), ST_LineInterpolatePoint(osm.geom, 0.5) )
+				  			ST_Area(ST_Intersection(
+				  				ST_Buffer(ST_LineSubstring( sdot.geom, LEAST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))), GREATEST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))) ), sdot.sw_width/39.37 *4, 'endcap=flat join=round'),
+				  				ST_Buffer(osm.geom, 1, 'endcap=flat join=round')
+				  			)) 
+				  	ELSE --ST_distance(
+				  		 --ST_LineInterpolatePoint(ST_LineSubstring( osm.geom, LEAST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom))), GREATEST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom)))) , 0.5), ST_LineInterpolatePoint(sdot.geom, 0.5))
+			  			 ST_Area(ST_Intersection(
+				  				ST_Buffer(ST_LineSubstring( osm.geom, LEAST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom))), GREATEST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom))) ), 1, 'endcap=flat join=round'),
+				  				ST_Buffer(sdot.geom, sdot.sw_width/39.37 * 4, 'endcap=flat join=round')
+				  			)) 
+				 END DESC
+		  	)  AS RANK
 		FROM jolie_sdot2osm_roosevelt.osm_sidewalk osm
 		JOIN jolie_sdot2osm_roosevelt.sdot_sidewalk sdot
-		ON ST_Intersects(ST_Buffer(sdot.geom, sdot.sw_width/39.37 + 5, 'endcap=flat join=round'), ST_Buffer(osm.geom, 1))
-		WHERE  osm.osm_id NOT IN (SELECT osm_id FROM jolie_sdot2osm_roosevelt.osm_connlink) AND 
-			   CASE
+		ON ST_Intersects(ST_Buffer(sdot.geom, sdot.sw_width/39.37 * 4, 'endcap=flat join=round'), ST_Buffer(osm.geom, 1, 'endcap=flat join=round'))
+		WHERE  CASE
 				  	WHEN (sdot.length > osm.length*0.85)
 				  		THEN 
 							 jolie_sdot2osm_roosevelt.f_within_degrees(ST_Angle(ST_LineSubstring( sdot.geom, LEAST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))), GREATEST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))) ), osm.geom), 15)
-							 --AND ST_Length(ST_LineSubstring( sdot.geom, LEAST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))), GREATEST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))) )) BETWEEN (osm.length*0.75) AND (osm.length*1.25)
 				  	ELSE -- osm.length > sdot.length
 						 jolie_sdot2osm_roosevelt.f_within_degrees(ST_Angle(ST_LineSubstring( osm.geom, LEAST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom))), GREATEST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom))) ), sdot.geom), 15) 
-						 --AND ST_Length(ST_LineSubstring( osm.geom, LEAST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom))), GREATEST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom))) )) BETWEEN ((sdot.length)*0.75) AND ((sdot.length)*1.25)
-			   END AND
-			   osm.osm_id NOT IN (SELECT distinct osm_id -- polygon
+			   END
+			   AND osm.osm_id NOT IN (SELECT distinct osm_id -- polygon
 			   					  FROM jolie_sdot2osm_roosevelt.polygon_osm_break )
 	    )
 	SELECT
@@ -154,6 +156,12 @@ CREATE TABLE jolie_sdot2osm_roosevelt.sdot2osm_sw_raw AS
 		  sw_width,
 		  surftype,
 		  cross_slope,
+		  CASE
+		  	WHEN osm_seg IS NULL
+		  		THEN ST_Length(ST_Intersection(sdot_seg, ST_Buffer(osm_geom, sw_width*5,  'endcap=flat join=round')))/ST_Length(sdot_seg)
+		  	ELSE 
+		  		ST_Length(ST_Intersection(osm_seg, ST_Buffer(sdot_geom, sw_width*5,  'endcap=flat join=round')))/ST_Length(osm_seg)
+		  END AS conflated_portion,		  
 		  osm_seg,
 		  osm_geom,
 		  sdot_seg,
@@ -161,12 +169,106 @@ CREATE TABLE jolie_sdot2osm_roosevelt.sdot2osm_sw_raw AS
 	FROM
 		  ranked_roads
 	WHERE
-		  rank = 1;
+		  rank = 1 AND
+		  CASE
+		  	WHEN osm_seg IS NULL
+		  		THEN ST_Length(ST_Intersection(sdot_seg, ST_Buffer(osm_geom, sw_width*5,  'endcap=flat join=round')))/ST_Length(sdot_seg) > 0.5
+		  	ELSE 
+		  		ST_Length(ST_Intersection(osm_seg, ST_Buffer(sdot_geom, sw_width*5,  'endcap=flat join=round')))/ST_Length(osm_seg) > 0.5
+		  END;
 
 	   
+		 
+		 
+		 
+
+		 
+		 
+-- Now self-join the sdot2osm_sw_raw table to see where the same osm_id kinda look at different sdots
+WITH osm_overlapping AS	 (
+	SELECT  sw1.*, 
+			ST_Length(sw1.sdot_seg)/ST_Length(sw1.sdot_geom) AS sub_over_whole
+	FROM (
+			SELECT *
+			FROM jolie_sdot2osm_roosevelt.sdot2osm_sw_raw
+			WHERE osm_seg IS NULL  ) sw1 -- osm < sdot 
+	JOIN (
+			SELECT *
+			FROM jolie_sdot2osm_roosevelt.sdot2osm_sw_raw  
+			WHERE sdot_seg IS NULL ) sw2 -- osm > sdot 
+	ON 		sw1.osm_id = sw2.osm_id
+	
+	UNION ALL 
+	
+	SELECT  sw2.*,
+			ST_Length(sw2.osm_seg)/ST_Length(sw2.osm_geom) AS sub_over_whole
+	FROM (
+			SELECT *
+			FROM jolie_sdot2osm_roosevelt.sdot2osm_sw_raw
+			WHERE osm_seg IS NULL  ) sw1 -- osm < sdot 
+	JOIN (
+			SELECT *
+			FROM jolie_sdot2osm_roosevelt.sdot2osm_sw_raw  
+			WHERE sdot_seg IS NULL ) sw2 -- osm > sdot 
+	ON		sw1.osm_id = sw2.osm_id
+	)
+SELECT *
+FROM osm_overlapping
+
+
+
+-- Now self-join the sdot2osm_sw_raw table to see where the same sdot kinda look at different osm
+-- the purpose is to clean things up and choose the best segments
+WITH sdot_overlapping AS (
+	SELECT  sw1.*,
+			ST_Length(sw1.osm_seg)/ST_Length(sw1.osm_geom) AS sub_over_whole
+	FROM (
+			SELECT *
+			FROM jolie_sdot2osm_roosevelt.sdot2osm_sw_raw
+			WHERE sdot_seg IS NULL ) sw1 -- sdot < osm 
+	JOIN (
+			SELECT *
+			FROM jolie_sdot2osm_roosevelt.sdot2osm_sw_raw  
+			WHERE osm_seg IS NULL  ) sw2 -- sdot > osm
+	ON 		sw1.sdot_objectid = sw2.sdot_objectid 
+	
+	UNION ALL 
+	
+	SELECT  sw2.*,  
+			ST_Length(sw2.sdot_seg)/ST_Length(sw2.sdot_geom) AS sub_over_whole
+	FROM (
+			SELECT *
+			FROM jolie_sdot2osm_roosevelt.sdot2osm_sw_raw
+			WHERE sdot_seg IS NULL ) sw1 -- sdot < osm 
+	JOIN (
+			SELECT *
+			FROM jolie_sdot2osm_roosevelt.sdot2osm_sw_raw  
+			WHERE osm_seg IS NULL  ) sw2 -- sdot > osm
+	ON 		sw1.sdot_objectid = sw2.sdot_objectid 
+	)
+SELECT *
+FROM sdot_overlapping
+
+
+
+
+
+
+SELECT * FROM jolie_sdot2osm_roosevelt.osm_sidewalk 
+WHERE osm_id NOT IN (SELECT osm_id FROM jolie_sdot2osm_roosevelt.osm_connlink)
+
+
+
+
+		 
 -- conflate the adjacent_linestring (osm) to sdot_sidewalk
 -- since 0 polygon, so no need to conflate
-		 
+
+
+
+
+
+
 -- case: osm > sdot:
 		 -- if there are 2 sdot looking at same osm_seg (more than 80% coverage)
 		 -- chose the sdot that is closer to the osm_seg
@@ -251,7 +353,7 @@ CREATE TABLE jolie_sdot2osm_roosevelt.sidewalk AS
 
 
 -- case when the whole osm_geom already conflated, but the there is its sub-seg conflating to another sdot, and it looks weird
-SELECT osm_id, sdot_objectid 
+SELECT * 
 FROM jolie_sdot2osm_roosevelt.sdot2osm_sw_raw
 WHERE osm_id IN (
 	SELECT r1.osm_id
@@ -346,11 +448,14 @@ CREATE TABLE jolie_sdot2osm_roosevelt.crossing_json AS
 		JOIN jolie_sdot2osm_roosevelt.sdot_accpedsig sdot
 		ON ST_Intersects(osm.geom, ST_Buffer(sdot.geom, 20))
 		) osm
+	
 	UNION
+	
+	-- IF the crossing did NOT conflate:
 	SELECT osm.osm_id, osm.highway, osm.tags, osm.geom AS way
 	FROM jolie_sdot2osm_roosevelt.osm_crossing osm
 	WHERE osm.osm_id NOT IN (
 		SELECT osm.osm_id
 		FROM jolie_sdot2osm_roosevelt.osm_crossing osm 
 		JOIN jolie_sdot2osm_roosevelt.sdot_accpedsig sdot
-		ON ST_Intersects(osm.geom, ST_Buffer(sdot.geom, 20)))
+		ON ST_Intersects(osm.geom, ST_Buffer(sdot.geom, 20)));
