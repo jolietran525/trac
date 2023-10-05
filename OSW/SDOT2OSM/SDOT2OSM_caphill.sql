@@ -64,7 +64,7 @@ CREATE TABLE jolie_sdot2osm_caphill.polygon_osm_break AS
 
 
 -- FUNCTION
-CREATE OR REPLACE FUNCTION jolie_sdot2osm_caphill.f_within_degrees(_rad DOUBLE PRECISION, _thresh int) RETURNS boolean AS $$
+CREATE OR REPLACE FUNCTION public.f_within_degrees(_rad DOUBLE PRECISION, _thresh int) RETURNS boolean AS $$
     WITH m AS (SELECT mod(degrees(_rad)::NUMERIC, 180) AS angle)
         ,a AS (SELECT CASE WHEN m.angle > 90 THEN m.angle - 180 ELSE m.angle END AS angle FROM m)
     SELECT abs(a.angle) < _thresh FROM a;
