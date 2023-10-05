@@ -3,7 +3,7 @@ CREATE TABLE jolie_sdot2osm_caphill.osm_sidewalk AS
 	SELECT *, ST_Length(way) AS length
 	FROM planet_osm_line pol 
 	WHERE   highway='footway' AND tags->'footway'='sidewalk' AND
-			way && st_setsrid( st_makebox2d( st_makepoint(-13616673,6039866), st_makepoint(-13613924,6042899)), 3857); --1589
+			way && st_setsrid( st_makebox2d( st_makepoint(-13616673,6039866), st_makepoint(-13613924,6042899)), 3857); --2385
 
 ALTER TABLE jolie_sdot2osm_caphill.osm_sidewalk RENAME COLUMN way TO geom;
 CREATE INDEX sw_geom ON jolie_sdot2osm_caphill.osm_sidewalk USING GIST (geom);
@@ -18,14 +18,8 @@ CREATE TABLE jolie_sdot2osm_caphill.osm_crossing AS
 ALTER TABLE jolie_sdot2osm_caphill.osm_crossing RENAME COLUMN way TO geom;
 CREATE INDEX crossing_geom ON jolie_sdot2osm_caphill.osm_crossing USING GIST (geom);
 
--- osm connlink
-CREATE TABLE jolie_sdot2osm_caphill.osm_connlink AS
-	SELECT sw.*
-	FROM jolie_sdot2osm_caphill.osm_crossing crossing
-	JOIN jolie_sdot2osm_caphill.osm_sidewalk sw
-	ON ST_Intersects(sw.geom, crossing.geom)
-	WHERE sw.length < 12; -- 922
-	
+
+
 -- sdot sidewalk
 CREATE TABLE jolie_sdot2osm_caphill.sdot_sidewalk AS
 	SELECT *, ST_Length(geom) AS length
@@ -157,35 +151,4 @@ CREATE INDEX sw_geom ON jolie_sdot2osm_caphill.osm_sidewalk USING GIST (geom);
 ALTER TABLE sdot.sidewalks RENAME COLUMN wkb_geometry TO geom;
 CREATE INDEX sdot_sw_geom ON sdot.sidewalks USING GIST (geom);
 
-
-SELECT *
-FROM sdot.sidewalks sdot
-JOIN jolie_sdot2osm_caphill.osm_sidewalk osm
-	 ON ST_Intersects(ST_Buffer(sdot.geom, sw_width/3.281), ST_Buffer(osm.geom, 3))
-WHERE st_astext(sdot.geom) != 'LINESTRING EMPTY'
-	  AND surftype != 'UIMPRV'
-	  AND sw_width != 0
-
-
-SELECT DISTINCT surftype 
-FROM sdot.sidewalks sdot
-WHERE st_astext(geom) != 'LINESTRING EMPTY'
-	  AND surftype != 'UIMPRV'
-	  AND sw_width != 0
-
-
-SELECT surftype, sw_width, count(*)
-FROM sdot.sidewalks sdot
-WHERE st_astext(geom) != 'LINESTRING EMPTY'
-	  AND sw_width = 0	 
-GROUP BY surftype, sw_width
-
-	  
-SELECT *
-FROM sdot.sidewalks
-WHERE surftype = 'PVAS'
-
-SELECT DISTINCT surftype
-FROM sdot.sidewalks
-WHERE st_astext(geom) != 'LINESTRING EMPTY'
 
