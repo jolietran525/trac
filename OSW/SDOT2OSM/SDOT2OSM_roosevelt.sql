@@ -392,7 +392,7 @@ CREATE TABLE jolie_sdot2osm_roosevelt.sidewalk_json AS
 	JOIN jolie_sdot2osm_roosevelt.osm_sidewalk osm
 	ON sdot2osm.osm_id = osm.osm_id
 	
-	UNION 
+	UNION ALL
 	
 	SELECT  osm_id,
 			NULL AS "sdot_objectid",
