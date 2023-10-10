@@ -20,26 +20,33 @@ CREATE TABLE jolie_sdot2osm_caphill.polygon_osm_break AS
 	WHERE 
 	    geom IS NOT NULL;
     
+
+	   
+	   
 -- function to determine if an angle is within limit threshold
-CREATE OR REPLACE FUNCTION jolie_sdot2osm_caphill.f_within_degrees(_rad DOUBLE PRECISION, _thresh int) RETURNS boolean AS $$
+CREATE OR REPLACE FUNCTION public.f_within_degrees(_rad DOUBLE PRECISION, _thresh int) RETURNS boolean AS $$
     WITH m AS (SELECT mod(degrees(_rad)::NUMERIC, 180) AS angle)
         ,a AS (SELECT CASE WHEN m.angle > 90 THEN m.angle - 180 ELSE m.angle END AS angle FROM m)
     SELECT abs(a.angle) < _thresh FROM a;
 $$ LANGUAGE SQL IMMUTABLE STRICT;
 
-CREATE TABLE jolie_sdot2osm_caphill.adjacent_lines AS
-SELECT  p1.osm_id AS osm_id
-		,p1.segment_number AS seg_a
-		,p1.geom AS geom_a
-		,p2.segment_number AS seg_b
-		,p2.geom AS geom_b
-FROM jolie_sdot2osm_caphill.polygon_osm_break p1
-JOIN jolie_sdot2osm_caphill.polygon_osm_break p2
-ON p1.osm_id = p2.osm_id AND p1.segment_number < p2.segment_number AND ST_Intersects(p1.geom, p2.geom)
-WHERE  jolie_sdot2osm_caphill.f_within_degrees(ST_Angle(p1.geom, p2.geom), 15);
 
--- a little test
-SELECT st_linemerge(ST_Union(ST_GeomFromText('LINESTRING (-13616136.701925 6040581.816692472, -13616154.8247381 6040597.9788913615)',3857),ST_GeomFromText('LINESTRING (-13616154.8247381 6040597.9788913615, -13616163.785957111 6040606.646068698)',3857)));
+
+
+CREATE TABLE jolie_sdot2osm_caphill.adjacent_lines AS
+	SELECT  p1.osm_id AS osm_id
+			,p1.segment_number AS seg_a
+			,p1.geom AS geom_a
+			,p2.segment_number AS seg_b
+			,p2.geom AS geom_b
+	FROM jolie_sdot2osm_caphill.polygon_osm_break p1
+	JOIN jolie_sdot2osm_caphill.polygon_osm_break p2
+	ON p1.osm_id = p2.osm_id AND p1.segment_number < p2.segment_number AND ST_Intersects(p1.geom, p2.geom)
+	WHERE  public.f_within_degrees(ST_Angle(p1.geom, p2.geom), 15);
+
+
+
+
 
 -- note to self for a minute: when updating _prev, update _first instead if it exists but only when not written
 CREATE TABLE jolie_sdot2osm_caphill.adjacent_linestrings (
@@ -48,6 +55,8 @@ CREATE TABLE jolie_sdot2osm_caphill.adjacent_linestrings (
 	,end_seg int8 NOT NULL
 	,geom GEOMETRY(linestring, 3857) NOT NULL
 );
+
+
 
 -- procedure to iterate over results and join adjacent segments
 -- NOTE: if doing for other tables, updte to pass input and output tables and use dynamic SQL
@@ -152,9 +161,14 @@ BEGIN
 END
 $$;
 
+
 CALL jolie_sdot2osm_caphill.stitch_segments();
 
-SELECT * FROM jolie_sdot2osm_caphill.adjacent_linestrings;
+
+
+SELECT * FROM jolie_sdot2osm_caphill.adjacent_linestrings
+
+
 
 INSERT INTO jolie_sdot2osm_caphill.adjacent_linestrings
 	SELECT osm_id, segment_number AS start_seg, segment_number AS end_seg, geom
@@ -167,3 +181,6 @@ INSERT INTO jolie_sdot2osm_caphill.adjacent_linestrings
 			SELECT osm_id, seg_b AS seg
 			FROM jolie_sdot2osm_caphill.adjacent_lines
 		)
+
+		
+

@@ -89,25 +89,25 @@ CREATE TABLE jolie_sdot2osm_roosevelt.sdot2osm_sw_raw AS
 		  osm.geom AS osm_geom,
 		  sdot.geom AS sdot_geom,
 		  CASE
-				WHEN (sdot.length > osm.length*0.85) THEN NULL
+				WHEN (sdot.length > osm.length) THEN NULL
 				ELSE ST_LineSubstring( osm.geom, LEAST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom))), GREATEST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom))) )
 		  END AS osm_seg,
 		  CASE
-				WHEN (sdot.length > osm.length*0.85)
+				WHEN (sdot.length > osm.length)
 					THEN ST_LineSubstring( sdot.geom, LEAST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))), GREATEST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))) )
 				ELSE NULL
 		  END AS sdot_seg,
 		  ROW_NUMBER() OVER (
 		  	PARTITION BY (
 		  		CASE
-				  	WHEN (sdot.length > osm.length*0.85) 
+				  	WHEN (sdot.length > osm.length) 
 				  		THEN  osm.geom
 				  	ELSE sdot.geom
 			  	END
 		  	)
 		  	ORDER BY
 		  		CASE
-				  	WHEN (sdot.length > osm.length*0.85)
+				  	WHEN (sdot.length > osm.length)
 				  		THEN --ST_distance(
 				  			--ST_LineInterpolatePoint(ST_LineSubstring( sdot.geom, LEAST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))), GREATEST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))) ), 0.5), ST_LineInterpolatePoint(osm.geom, 0.5) )
 				  			ST_Area(ST_Intersection(
@@ -126,7 +126,7 @@ CREATE TABLE jolie_sdot2osm_roosevelt.sdot2osm_sw_raw AS
 		JOIN jolie_sdot2osm_roosevelt.sdot_sidewalk sdot
 		ON ST_Intersects(ST_Buffer(sdot.geom, sdot.sw_width * 4, 'endcap=flat join=round'), ST_Buffer(osm.geom, 1, 'endcap=flat join=round'))
 		WHERE  CASE
-				  	WHEN (sdot.length > osm.length*0.85)
+				  	WHEN (sdot.length > osm.length)
 				  		THEN 
 							 public.f_within_degrees(ST_Angle(ST_LineSubstring( sdot.geom, LEAST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))), GREATEST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))) ), osm.geom), 15)
 				  	ELSE -- osm.length > sdot.length
@@ -262,7 +262,7 @@ WHERE (osm_id, sdot_objectid) IN (
 		ON r1.osm_id = r2.osm_id
 		WHERE     r1.osm_seg IS NOT NULL
 			  AND r2.osm_seg IS NULL
-			  AND ST_Length(ST_Intersection(ST_Buffer(r1.sdot_geom, r1.sw_width*5, 'endcap=flat join=round'), r2.sdot_seg))/LEAST(ST_Length(r1.sdot_geom), ST_Length(r2.sdot_seg)) > 0.5 );
+			  AND ST_Length(ST_Intersection(ST_Buffer(r1.sdot_geom, r1.sw_width*5, 'endcap=flat join=round'), r2.sdot_seg))/LEAST(ST_Length(r1.sdot_geom), ST_Length(r2.sdot_seg)) > 0.4 );
 
 			  
 			  
@@ -291,7 +291,7 @@ WHERE (osm_id, sdot_objectid) IN  (
 		ON r1.sdot_objectid = r2.sdot_objectid
 		WHERE 	  r1.sdot_seg IS NOT NULL
 			  AND r2.sdot_seg IS NULL
-			  AND ST_Length(ST_Intersection(ST_Buffer(r1.osm_geom, r1.sw_width*5, 'endcap=flat join=round'), r2.osm_seg))/LEAST(ST_Length(r1.osm_geom), ST_Length(r2.osm_seg)) > 0.5  );
+			  AND ST_Length(ST_Intersection(ST_Buffer(r1.osm_geom, r1.sw_width*5, 'endcap=flat join=round'), r2.osm_seg))/LEAST(ST_Length(r1.osm_geom), ST_Length(r2.osm_seg)) > 0.4  );
 
 	  
 
