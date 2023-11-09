@@ -360,7 +360,7 @@ CREATE TABLE jolie_sdot2osm_seattle_1.sdot2osm_sw_raw AS (
 		  		THEN ST_Length(ST_Intersection(sdot_seg, ST_Buffer(osm_geom, sw_width*8,  'endcap=flat join=round')))/GREATEST(ST_Length(sdot_seg), ST_Length(osm_geom)) > 0.15 -- TODO: need TO give it a PARAMETER later as we wanna change
 		  	ELSE
 		  		ST_Length(ST_Intersection(osm_seg, ST_Buffer(sdot_geom, sw_width*8,  'endcap=flat join=round')))/GREATEST(ST_Length(osm_seg), ST_Length(sdot_geom)) > 0.15 -- TODO: need TO give it a PARAMETER later as we wanna change
-		  END ); -- 1836
+		  END ); -- 30187, 5759.349 secs
 
 
 
@@ -576,7 +576,7 @@ CREATE TABLE jolie_sdot2osm_seattle_1.sdot2osm_sw_prepocessed AS (
 					  	    > 0.4
 				END 		
 	    	)
-	   ); -- 1819
+	   ); -- 29840, 0.244 secs
     
 
 	  
@@ -590,7 +590,8 @@ CREATE TABLE jolie_sdot2osm_seattle_1.sdot2osm_sw_prepocessed AS (
 CREATE TABLE jolie_sdot2osm_seattle_1.sdot2osm_metrics_sdot AS (
 	SELECT  sdot.objectid,
 			COALESCE(SUM(ST_Length(sdot2osm.conflated_sdot_seg))/ST_Length(sdot.geom), 0) AS percent_conflated,
-			sdot.geom, ST_UNION(sdot2osm.conflated_sdot_seg) AS sdot_conflated_subseg 
+			ST_Transform(sdot.geom, 4326) AS geom
+			--ST_UNION(sdot2osm.conflated_sdot_seg) AS sdot_conflated_subseg 
 	FROM jolie_sdot2osm_seattle_1.sdot_sidewalk sdot
 	LEFT JOIN (
 				SELECT *,
@@ -604,9 +605,9 @@ CREATE TABLE jolie_sdot2osm_seattle_1.sdot2osm_metrics_sdot AS (
 				FROM jolie_sdot2osm_seattle_1.sdot2osm_sw_prepocessed
 			) sdot2osm
 	ON sdot.objectid = sdot2osm.sdot_objectid
-	GROUP BY sdot.objectid, sdot2osm.sdot_objectid, sdot.geom ); --1229
+	GROUP BY sdot.objectid, sdot2osm.sdot_objectid, sdot.geom ); --34848
 
-
+SELECT * FROM jolie_sdot2osm_seattle_1.sdot2osm_metrics_sdot
 
 -- NOT IMPORTANT --
 -- create a table with metrics:
@@ -615,7 +616,8 @@ CREATE TABLE jolie_sdot2osm_seattle_1.sdot2osm_metrics_sdot AS (
 CREATE TABLE jolie_sdot2osm_seattle_1.sdot2osm_metrics_osm AS (
 		SELECT  osm.osm_id,
 				COALESCE(SUM(ST_Length(sdot2osm.conflated_osm_seg))/ST_Length(osm.geom), 0) AS percent_conflated,
-				osm.geom, ST_UNION(sdot2osm.conflated_osm_seg) AS osm_conflated_subseg
+				ST_Transform(osm.geom, 4326) AS geom
+				--ST_UNION(sdot2osm.conflated_osm_seg) AS osm_conflated_subseg
 		FROM jolie_sdot2osm_seattle_1.osm_sidewalk osm
 		LEFT JOIN (
 					SELECT *,
@@ -628,9 +630,9 @@ CREATE TABLE jolie_sdot2osm_seattle_1.sdot2osm_metrics_osm AS (
 					FROM jolie_sdot2osm_seattle_1.sdot2osm_sw_prepocessed
 				) sdot2osm
 		ON osm.osm_id = sdot2osm.osm_id
-		GROUP BY osm.osm_id, sdot2osm.osm_id, osm.geom ); -- 2385
+		GROUP BY osm.osm_id, sdot2osm.osm_id, osm.geom ); -- 45628
 
-    
+SELECT * FROM jolie_sdot2osm_seattle_1.sdot2osm_metrics_osm
 
 
 
@@ -664,7 +666,7 @@ CREATE TABLE jolie_sdot2osm_seattle_1.sidewalk AS
 		    END AS way,
 		    osm_geom,
 		    sdot_geom
-	FROM jolie_sdot2osm_seattle_1.sdot2osm_sw_prepocessed; -- 1819
+	FROM jolie_sdot2osm_seattle_1.sdot2osm_sw_prepocessed; -- 29840, 0.160 secs
 
 
 
@@ -710,8 +712,8 @@ CREATE TABLE jolie_sdot2osm_seattle_1.sidewalk_json AS (
 	ON osm.osm_id = pre_osm.osm_id
 	WHERE (pre_osm.osm_id, pre_osm.start_end_seg) NOT IN (
 			SELECT DISTINCT osm_id, start_end_seg
-			FROM jolie_sdot2osm_seattle_1.sidewalk ) -- 707
-	); --2526
+			FROM jolie_sdot2osm_seattle_1.sidewalk ) -- 20942
+	); --50782, 0.156 secs
 	  
 
 	

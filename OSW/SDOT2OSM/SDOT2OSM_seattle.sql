@@ -262,7 +262,11 @@ CREATE TABLE jolie_sdot2osm_seattle.osm_sidewalk_preprocessed AS (
 	FROM jolie_sdot2osm_seattle.osm_sidewalk
 	WHERE NOT ST_IsClosed(geom) ); -- 2399
 
-	
+SELECT *
+FROM jolie_sdot2osm_seattle.osm_sidewalk_preprocessed p1
+JOIN jolie_sdot2osm_seattle.osm_sidewalk_preprocessed p2
+ON ST_Intersects(p1.geom, p2.geom)
+WHERE p1.osm_id = 758443714 AND p2.osm_id = 758443714 AND p1.start_end_seg != p2.start_end_seg 
 	
 
 -- changes:
@@ -307,19 +311,19 @@ CREATE TABLE jolie_sdot2osm_seattle.sdot2osm_sw_raw AS (
 				  	WHEN (sdot.length > osm.length)
 				  		THEN 
 				  			ST_Area(ST_Intersection(
-				  				ST_Buffer(ST_LineSubstring( sdot.geom, LEAST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))), GREATEST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))) ), sdot.sw_width *5, 'endcap=flat join=round'),
-				  				ST_Buffer(osm.geom, 3, 'endcap=flat join=round')
+				  				ST_Buffer(ST_LineSubstring( sdot.geom, LEAST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))), GREATEST(ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_startpoint(osm.geom), sdot.geom)) , ST_LineLocatePoint(sdot.geom, ST_ClosestPoint(st_endpoint(osm.geom), sdot.geom))) ), 10, 'endcap=flat join=round'),
+				  				ST_Buffer(osm.geom, 10, 'endcap=flat join=round')
 				  			)) 
 				  	ELSE
 				  		ST_Area(ST_Intersection(
-				  				ST_Buffer(ST_LineSubstring( osm.geom, LEAST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom))), GREATEST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom))) ), 3, 'endcap=flat join=round'),
-				  				ST_Buffer(sdot.geom, sdot.sw_width * 5, 'endcap=flat join=round')
+				  				ST_Buffer(ST_LineSubstring( osm.geom, LEAST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom))), GREATEST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom))) ), 10, 'endcap=flat join=round'),
+				  				ST_Buffer(sdot.geom, 10, 'endcap=flat join=round')
 				  			)) 
 				 END DESC
 		  	)  AS RANK
 		FROM jolie_sdot2osm_seattle.osm_sidewalk_preprocessed osm
 		JOIN jolie_sdot2osm_seattle.sdot_sidewalk sdot
-		ON ST_Intersects(ST_Buffer(sdot.geom, sdot.sw_width * 5, 'endcap=flat join=round'), ST_Buffer(osm.geom, 3, 'endcap=flat join=round'))
+		ON ST_Intersects(ST_Buffer(sdot.geom, 10, 'endcap=flat join=round'), ST_Buffer(osm.geom, 10, 'endcap=flat join=round'))
 		WHERE  CASE
 				  	WHEN (sdot.length > osm.length)
 				  		THEN 
@@ -327,25 +331,25 @@ CREATE TABLE jolie_sdot2osm_seattle.sdot2osm_sw_raw AS (
 				  	ELSE -- osm.length > sdot.length
 						 public.f_within_degrees(ST_Angle(ST_LineSubstring( osm.geom, LEAST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom))), GREATEST(ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_startpoint(sdot.geom), osm.geom)) , ST_LineLocatePoint(osm.geom, ST_ClosestPoint(st_endpoint(sdot.geom), osm.geom))) ), sdot.geom), 15) 
 			   END
-	    )
-	SELECT
-		  osm_id,
-		  start_end_seg,
-		  sdot_objectid,
-		  sw_width,
-		  surftype,
-		  cross_slope,
-		  sw_category,
-		  CASE
-		  	WHEN osm_seg IS NULL
-		  		THEN ST_Length(ST_Intersection(sdot_seg, ST_Buffer(osm_geom, sw_width*8,  'endcap=flat join=round')))/GREATEST(ST_Length(sdot_seg), ST_Length(osm_geom))
-		  	ELSE 
-		  		ST_Length(ST_Intersection(osm_seg, ST_Buffer(sdot_geom, sw_width*8,  'endcap=flat join=round')))/GREATEST(ST_Length(osm_seg), ST_Length(sdot_geom))
-		  END AS conflated_score,		  
-		  osm_seg,
-		  osm_geom,
-		  sdot_seg,
-		  sdot_geom
+	    ) -- 1900 (width*5 + 3); 2396 (12 vs 8); 2063 (12 vs 6); (10 vs 10) 
+	SELECT COUNT(*)
+--		  osm_id,
+--		  start_end_seg,
+--		  sdot_objectid,
+--		  sw_width,
+--		  surftype,
+--		  cross_slope,
+--		  sw_category,
+--		  CASE
+--		  	WHEN osm_seg IS NULL
+--		  		THEN ST_Length(ST_Intersection(sdot_seg, ST_Buffer(osm_geom, 15,  'endcap=flat join=round')))/GREATEST(ST_Length(sdot_seg), ST_Length(osm_geom))
+--		  	ELSE 
+--		  		ST_Length(ST_Intersection(osm_seg, ST_Buffer(sdot_geom, 15,  'endcap=flat join=round')))/GREATEST(ST_Length(osm_seg), ST_Length(sdot_geom))
+--		  END AS conflated_score,		  
+--		  osm_seg,
+--		  osm_geom,
+--		  sdot_seg,
+--		  sdot_geom
 	FROM
 		  ranked_roads
 	WHERE
@@ -354,9 +358,9 @@ CREATE TABLE jolie_sdot2osm_seattle.sdot2osm_sw_raw AS (
 		  -- for example, if the intersection between the (full) sdot and the (sub seg) osm is less than 10% of the length of any 2 of them, it means we did not conflated well, and we want to filter it out
 		  CASE
 		  	WHEN osm_seg IS NULL
-		  		THEN ST_Length(ST_Intersection(sdot_seg, ST_Buffer(osm_geom, sw_width*8,  'endcap=flat join=round')))/GREATEST(ST_Length(sdot_seg), ST_Length(osm_geom)) > 0.15 -- TODO: need TO give it a PARAMETER later as we wanna change
+		  		THEN ST_Length(ST_Intersection(sdot_seg, ST_Buffer(osm_geom, 16,  'endcap=flat join=round')))/GREATEST(ST_Length(sdot_seg), ST_Length(osm_geom)) > 0.15 -- TODO: need TO give it a PARAMETER later as we wanna change
 		  	ELSE
-		  		ST_Length(ST_Intersection(osm_seg, ST_Buffer(sdot_geom, sw_width*8,  'endcap=flat join=round')))/GREATEST(ST_Length(osm_seg), ST_Length(sdot_geom)) > 0.15 -- TODO: need TO give it a PARAMETER later as we wanna change
+		  		ST_Length(ST_Intersection(osm_seg, ST_Buffer(sdot_geom, 16,  'endcap=flat join=round')))/GREATEST(ST_Length(osm_seg), ST_Length(sdot_geom)) > 0.15 -- TODO: need TO give it a PARAMETER later as we wanna change
 		  END ); -- 1836
 
 
@@ -375,7 +379,7 @@ CREATE TABLE jolie_sdot2osm_seattle.sdot2osm_sw_prepocessed AS (
 	    jolie_sdot2osm_seattle.sdot2osm_sw_raw
 	WHERE 
 	    (CONCAT(osm_id, start_end_seg), sdot_objectid) NOT IN ( 
-	    	-- case when the whole sdot already conflated to one osm, but then its subseg also conflated to another osm
+	    	-- case when the whole sdot already conflated to one osm, but then its sdot subseg also conflated to another osm
 			-- if these 2 osm overlap at least 50% of the shorter one between 2 of them, then we filter out the one that's further away from our sdot
 	        SELECT 
 				    CONCAT(r1.osm_id, r1.start_end_seg),
@@ -587,7 +591,8 @@ CREATE TABLE jolie_sdot2osm_seattle.sdot2osm_sw_prepocessed AS (
 CREATE TABLE jolie_sdot2osm_seattle.sdot2osm_metrics_sdot AS (
 	SELECT  sdot.objectid,
 			COALESCE(SUM(ST_Length(sdot2osm.conflated_sdot_seg))/ST_Length(sdot.geom), 0) AS percent_conflated,
-			sdot.geom, ST_UNION(sdot2osm.conflated_sdot_seg) AS sdot_conflated_subseg 
+			sdot.geom,
+			ST_UNION(sdot2osm.conflated_sdot_seg) AS sdot_conflated_subseg 
 	FROM jolie_sdot2osm_seattle.sdot_sidewalk sdot
 	LEFT JOIN (
 				SELECT *,
@@ -612,7 +617,8 @@ CREATE TABLE jolie_sdot2osm_seattle.sdot2osm_metrics_sdot AS (
 CREATE TABLE jolie_sdot2osm_seattle.sdot2osm_metrics_osm AS (
 		SELECT  osm.osm_id,
 				COALESCE(SUM(ST_Length(sdot2osm.conflated_osm_seg))/ST_Length(osm.geom), 0) AS percent_conflated,
-				osm.geom, ST_UNION(sdot2osm.conflated_osm_seg) AS osm_conflated_subseg
+				osm.geom,
+				--ST_UNION(sdot2osm.conflated_osm_seg) AS osm_conflated_subseg
 		FROM jolie_sdot2osm_seattle.osm_sidewalk osm
 		LEFT JOIN (
 					SELECT *,
