@@ -96,17 +96,15 @@ t_conflation.then(conflation => {
             // Attach a mouseover event handler
             layer.on('mouseover', function (e) {
                 layer.setStyle({
-                    weight: 5, opacity: 0.5, color: '#cc41f2'
+                    color: '#cc41f2'
                 });
             });
 
             // Attach a mouseout event handler to reset the style
             layer.on('mouseout', function (e) {
-                if (highlightedFeature !== layer) {
-                    layer.setStyle({
-                        weight: 5, opacity: 0.5, color: score_bin(layer.feature.properties.conflated_score)
-                    });
-                }
+                layer.setStyle({
+                    color: score_bin(layer.feature.properties.conflated_score)
+                });
             });
 
 
@@ -127,8 +125,8 @@ t_conflation.then(conflation => {
                 // Highlight the clicked feature in the conflation layer
                 layer.setStyle({
                     weight: 10,           // Adjust the weight to highlight
-                    opacity: 0.7,          // Adjust the opacity to highlight
-                    color: '#cc41f2'    // Set a different color for highlighting
+                    opacity: 0.7,         // Adjust the opacity to highlight
+                    color: score_bin(layer.feature.properties.conflated_score)    // Set a different color for highlighting
                 });
     
                 map.fitBounds(layer.getBounds(), { maxZoom: 17 });
@@ -148,6 +146,17 @@ t_conflation.then(conflation => {
 
 });
 
+
+osmLayer.setZIndex(1);  // You can set any integer value based on your requirements
+
+// Set z-index for SDOT Layer
+sdotLayer.setZIndex(2);  // You can set any integer value based on your requirements
+
+// Set z-index for Conflation Layer
+conflationLayer.setZIndex(3);  // You can set any integer value based on your requirements
+
+
+
 // Legend for SDOT Layer
 let layerLegend = L.control({ position: 'bottomleft' });
 layerLegend.onAdd = function (map) {
@@ -166,14 +175,6 @@ layerLegend.onAdd = function (map) {
     return div;
 };
 layerLegend.addTo(map);
-
-osmLayer.setZIndex(1);  // You can set any integer value based on your requirements
-
-// Set z-index for SDOT Layer
-sdotLayer.setZIndex(2);  // You can set any integer value based on your requirements
-
-// Set z-index for Conflation Layer
-conflationLayer.setZIndex(4);  // You can set any integer value based on your requirements
 
 
 // Function to highlight features in the sdot layer with a specific object ID
@@ -215,6 +216,7 @@ function highlightFeaturesInOSM(osm_id) {
         }
     });
 }
+
 
 // get edges and add to map
 // const t_cross = d3.json("./data/crossing_full_json.geojson");
