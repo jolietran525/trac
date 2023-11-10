@@ -12,7 +12,6 @@ function iso8601(date) { return new Date(date).toLocaleString('sv-SV'); }
 // get local formatted datetime beginning of month YYYY-MM
 function get_mon(date) { return new Date(date).toISOString().substr(0,7); }
 
-// hat-tip to http://lyzidiamond.com/posts/external-geojson-and-leaflet-the-other-way/
 function popup_attributes(feature, layer) {
     let html = '<table>';
     for (attrib in feature.properties) {
@@ -46,7 +45,7 @@ title.onAdd = function(mp) {
 title.addTo(map);
 
 let osmLayer;
-const t_osm = d3.json("./data/metrics_osm_full.geojson");
+const t_osm = d3.json("data/metrics_osm_full.geojson");
 t_osm.then(osm => {
     // add features to map
     osmLayer  = L.geoJSON(osm, {
@@ -56,11 +55,13 @@ t_osm.then(osm => {
 
     // zoom to content
     // map.fitBounds(osmLayer.getBounds());
+
+    osmLayer.setZIndex(1);
 });
 
 
 let sdotLayer;
-const t_sdot = d3.json("./data/metrics_sdot_full.geojson");
+const t_sdot = d3.json("data/metrics_sdot_full.geojson");
 t_sdot.then(sdot => {
     // add features to map
     sdotLayer = L.geoJSON(sdot, {
@@ -70,11 +71,13 @@ t_sdot.then(sdot => {
 
     // zoom to content
     map.fitBounds(sdotLayer.getBounds());
+
+    sdotLayer.setZIndex(2);
 });
 
 let conflationLayer;
 // get edges and add to map
-const t_conflation = d3.json("./data/sidewalk_full_json.geojson");
+const t_conflation = d3.json("data/sidewalk_full_json.geojson");
 t_conflation.then(conflation => {
     // Filter the GeoJSON features based on the 'conflated_score'
     const filteredFeatures = conflation.features.filter(feature => feature.properties.conflated_score < 0.8 && feature.properties.conflated_score != null);
@@ -129,7 +132,7 @@ t_conflation.then(conflation => {
                     color: score_bin(layer.feature.properties.conflated_score)    // Set a different color for highlighting
                 });
     
-                map.fitBounds(layer.getBounds(), { maxZoom: 17 });
+                map.fitBounds(layer.getBounds(), { maxZoom: 18 });
 
                 // Set the currently highlighted feature
                 highlightedFeature = layer;
@@ -143,17 +146,11 @@ t_conflation.then(conflation => {
         }
     }).addTo(map);
     
+    conflationLayer.setZIndex(3);
 
+    map.fitBounds(conflationLayer.getBounds());
 });
 
-
-osmLayer.setZIndex(1);  // You can set any integer value based on your requirements
-
-// Set z-index for SDOT Layer
-sdotLayer.setZIndex(2);  // You can set any integer value based on your requirements
-
-// Set z-index for Conflation Layer
-conflationLayer.setZIndex(3);  // You can set any integer value based on your requirements
 
 
 
@@ -184,7 +181,7 @@ function highlightFeaturesInSDOT(sdot_objectid) {
         if (layer.feature.properties.objectid === sdot_objectid) {
             // Apply a highlight style to the matching feature
             layer.setStyle({
-                weight: 10,          // Adjust the weight to highlight
+                weight: 15,          // Adjust the weight to highlight
                 opacity: 1,         // Adjust the opacity to highlight
                 color: "#E4C1BA"    // Set a different color for highlighting
             });
@@ -205,7 +202,7 @@ function highlightFeaturesInOSM(osm_id) {
         if (layer.feature.properties.osm_id === osm_id) {
             // Apply a highlight style to the matching feature
             layer.setStyle({
-                weight: 10,          // Adjust the weight to highlight
+                weight: 15,          // Adjust the weight to highlight
                 opacity: 1,         // Adjust the opacity to highlight
                 color: "#BAD4E4"    // Set a different color for highlighting
             });
@@ -216,18 +213,3 @@ function highlightFeaturesInOSM(osm_id) {
         }
     });
 }
-
-
-// get edges and add to map
-// const t_cross = d3.json("./data/crossing_full_json.geojson");
-// t_cross.then(cross => {
-
-//   // add features to map
-//   let e = L.geoJSON(cross, {
-//     style: { weight: 4, opacity: 0.5, color: "#0c9" },
-//     onEachFeature: popup_attributes
-//   }).addTo(map);
-
-//   // zoom to content
-//   //map.fitBounds(e.getBounds());
-// });
