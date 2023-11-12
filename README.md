@@ -1,21 +1,33 @@
-# About the Project
-The Transportation Data Equity Initiative project is led by the Taskar Center for Accessible Technology (TCAT) and co-investigated by the Washington State Transportation Center (TRAC) at the University of Washington. This initiative aims to provide detailed, accurate data about pedestrian spaces, effectively bridging the gap between existing data and the real-world needs of those with mobility challenges.
+# About the Project: Transportation Data Equity Initiative
 
-This project recognizes the vital role of detailed and accurate data concerning pedestrian spaces, travel environments, and travel services in trip planning, concierge services, and mobile wayfinding applications. We realize that data on pedestrian spaces must be as descriptive and specific as possible. For instance, instead of labeling a path 'wheelchair accessible,' we need to "store data on its steepness and interpret it based on rules like 'no steepness greater than eight percent'". We will deploy this project in six counties: two each in Maryland, Oregon, and Washington state.
+In the dynamic realm of accessible technology, the Transportation Data Equity Initiative is a groundbreaking project led by the Taskar Center for Accessible Technology (TCAT) in collaboration with the Washington State Transportation Center (TRAC) at the University of Washington. Our mission is clear: to bridge the gap between existing data and the real-world needs of individuals facing mobility challenges.
 
-# My Role
-As a GIS Analyst at TRAC, my role serves the purpose of automating the process of collecting and intergrating data from publicly available transportation data into OpenStreetMap (OSM) so that we have a more comprehensive sidewalk dataset that is openly available.
+## The Challenge: Enhancing Pedestrian Spaces Through Data Precision
 
-# My Conflation Attempts
-Here are the conflation attempts that I have been working on:
-1. ARNOLD-OSM
-    The following process is designed to conflate two networks: OpenStreetMap (OSM) and All Roads Network Of Linear Referenced Data (ARNOLD). These two networks contain sidewalk data (OSM) and street data (ARNOLD). The outcome of the process can be used for multiple purposes, including: 
-    * Vetting of data by finding inconsistencies between two datasets 
-    * Allowing for transfer from one dataset to another by identifying comparable network segments and nodes 
-    * Identifying parallel and associated network segments (e.g. in this case, which roadway segments should be associated with which sidewalk segments and vice versa)
-2. SDOT-OSM
-    The following process is designed to conflate two networks: OpenStreetMap (OSM) and Seattle Department of Transportation (SDOT). The networks include two alternative sidewalk networks, and one crossing network versus one accessible pedestrian signal network. The outcome of the process can be used for multiple purposes, including: 
-    * Vetting of data by finding inconsistencies between two datasets 
-    * Allowing for transfer from one dataset to another by identifying comparable network segments and nodes 
-    * Identifying parallel and associated network segments (e.g., which sidewalks segments in this network should be associated with which sidewalk segments in another network and vice versa.)  
+Recognizing the pivotal role of accurate data in trip planning, concierge services, and mobile wayfinding applications, our initiative focuses on refining data related to pedestrian spaces. We go beyond mere labels, insisting on granularity, such as storing data on the steepness of paths with rules like 'no steepness greater than eight percent.' This meticulous approach ensures that our data serves the diverse needs of individuals with mobility challenges. Our scope extends across six counties, with targeted deployment in Maryland, Oregon, and Washington state.
 
+## My Role as a GIS Analyst at TRAC:
+
+In my capacity as a GIS Analyst at TRAC, I play a key role in automating the collection and integration of publicly available transportation data into OpenStreetMap (OSM). This initiative aims to create a more comprehensive and openly accessible sidewalk dataset, addressing the specific needs of our community.
+
+## Conflation Attempts: Navigating Complex Networks
+
+I have been actively engaged in two significant conflation attempts, each designed to harmonize diverse datasets and enhance the quality of sidewalk information.
+
+### 1. ARNOLD-OSM Conflation:
+   - **Purpose:** Vet data inconsistencies, transfer data between datasets, and identify associated network segments.
+   - **My Contribution:** Employing advanced GIS techniques, I orchestrated the conflation of OpenStreetMap (OSM) and the All Roads Network Of Linear Referenced Data (ARNOLD). The outcome enhances our understanding of sidewalk and street data, offering valuable insights for trip planning and infrastructure improvement.
+
+### 2. SDOT-OSM Conflation:
+   - **Purpose:** Identify inconsistencies, facilitate data transfer, and pinpoint associated network segments.
+   - **My Contribution:** Through a meticulous process, I navigated the conflation of OpenStreetMap (OSM) with the Seattle Department of Transportation (SDOT) data. This resulted in an enriched dataset, facilitating improved accessibility information and contributing to the overall success of our initiative.
+
+## Technical Proficiency:
+
+My work encompasses a range of technical skills, including expertise in GIS tools, data integration, and conflation techniques. By leveraging these skills, I contribute to the creation of a robust and reliable sidewalk dataset that serves the diverse needs of our community.
+
+## Results and Future Steps:
+
+The conflation processes I led have yielded tangible outcomes, including enhanced data accuracy and improved accessibility information. As we move forward, I remain committed to refining and expanding our dataset, ensuring its ongoing relevance and impact.
+
+This portfolio is a testament to my dedication to leveraging technology for social good, and I am excited about the potential for positive change that our work in the Transportation Data Equity Initiative brings to communities facing mobility challenges.
