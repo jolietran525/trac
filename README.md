@@ -12,11 +12,12 @@ In my capacity as a GIS Analyst at TRAC, I play a key role in automating the col
 
 ## Conflation Attempts: Navigating Complex Networks
 
-I have been actively engaged in two significant conflation attempts, each designed to harmonize diverse datasets and enhance the quality of sidewalk information.
+I have been actively engaged in three significant conflation attempts, each designed to harmonize diverse datasets and enhance the quality of sidewalk information.
 
 ### 1. ARNOLD-OSM Conflation:
-   - **Purpose:** Vet data inconsistencies, transfer data between datasets, and identify associated network segments.
-   - **My Contribution:** Employing advanced GIS techniques, I orchestrated the conflation of OpenStreetMap (OSM) and the All Roads Network Of Linear Referenced Data (ARNOLD). The outcome enhances our understanding of sidewalk and street data, offering valuable insights for trip planning and infrastructure improvement.
+   - **Purpose:** The primary goal is to identify the sidewalk segments in OpenStreetMap (OSM) that associate with a single road segment in the All Roads Network Of Linear Referenced Data (ARNOLD). This process allows us to extract traffic volume information from ARNOLD and incorporate it into our OSM sidewalk data as a new tag, utilizing the hstore data type. From the OSM perspective, this results in an additional attribute of traffic volume for sidewalk segments, providing valuable data for assessing safety when a pedestrian crosses the road. Simultaneously, we share the conflation result with ARNOLD stakeholders, enhancing their awareness of sidewalk locations and distribution.
+   - **My Contribution:** Design a procedure in PostgreSQL that does the following:
+      * Pre-process the road (ARNOLD) and sidewalk (OSM) data by breaking up 
 
 ### 2. SDOT-OSM Conflation:
    - **Purpose:** Identify inconsistencies, facilitate data transfer, and pinpoint associated network segments.
