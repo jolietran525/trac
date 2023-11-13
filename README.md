@@ -17,28 +17,55 @@ I have been actively engaged in three significant conflation attempts, each desi
 ### 1. ARNOLD-OSM Conflation:
    - **Purpose:** The primary goal is to identify the sidewalk segments in OpenStreetMap (OSM) that associate with a single road segment in the All Roads Network Of Linear Referenced Data (ARNOLD). This process allows us to extract traffic volume information from ARNOLD and incorporate it into our OSM sidewalk data as a new tag, utilizing the hstore data type. From the OSM perspective, this results in an additional attribute of traffic volume for sidewalk segments, providing valuable data for assessing safety when a pedestrian crosses the road. Simultaneously, we share the conflation result with ARNOLD stakeholders, enhancing their awareness of sidewalk locations and distribution.
    - **My Contribution:** Design a procedure in PostgreSQL that does the following:
-   1. **Initialization:**
-      - Set up the databases and necessary software tools.
-      - Load the networks (OSM and ARNOLD) into the database.
-   2. **Preprocessing:**
-      - Subsegment the original network segments for better conflation.
-   3. **Spatial Joins:**
-      - Perform spatial joins using the methods described earlier to create conflation tables.
-   4. **Parallelism Checks:**
-      - Check for parallelism between associated geometries to ensure proper conflation.
-   5. **Conflation Table Generation:**
-      - Generate conflation tables containing the relationships between sidewalk and roadway segments.
-   6. **Quality Assurance:**
-      - Review and validate the conflation results.
-   7. **Export Data:**
-      - Export the conflation results in database or GeoJSON formats.
-   
-   **Read more about this attemp:** [ARNOLD2OSM: Conflaion Explanaion](ARNOLD2OSM/ConflationExplain.md)
+      1. **Initialization:**
+         - Set up the databases and necessary software tools.
+         - Load the networks (OSM and ARNOLD) into the database.
+      2. **Preprocessing:**
+         - Subsegment the original network segments for better conflation.
+      3. **Spatial Joins:**
+         - Perform spatial joins using combined methods to create conflation tables.
+      4. **Parallelism Checks:**
+         - Check for parallelism between associated geometries to ensure proper conflation.
+      5. **Conflation Table Generation:**
+         - Generate conflation tables containing the relationships between sidewalk and roadway segments.
+      6. **Quality Assurance:**
+         - Review and validate the conflation results.
+      7. **Export Data:**
+         - Export the conflation results in database or GeoJSON formats.
+   - **Read more about this conflation attempt:** [ARNOLD2OSM: Conflation Explanaion](ARNOLD2OSM/ConflationExplain.md)
 
 
 ### 2. SDOT-OSM Conflation:
-   - **Purpose:** Identify inconsistencies, facilitate data transfer, and pinpoint associated network segments.
-   - **My Contribution:** Through a meticulous process, I navigated the conflation of OpenStreetMap (OSM) with the Seattle Department of Transportation (SDOT) data. This resulted in an enriched dataset, facilitating improved accessibility information and contributing to the overall success of our initiative.
+   - **Purpose:** The primary goal is to:
+      1. Identify Seattle sidewalks in OpenStreetMap (OSM) corresponding to the Seattle Department of Transportation (SDOT) sidewalk datasets. Attributes like sidewalk width, slope, and surface type from SDOT are integrated into OSM sidewalk data. Additionally, we aim to identify sidewalk segments in SDOT that do not exist in OSM, facilitating data enrichment in OSM.
+      2. Pinpoint intersections in Seattle with Accessible Pedestrian Signals (APS) using SDOT's APS dataset. Then, update or add tags to OSM crossings at these intersections to reflect the latest status accurately.
+   - **My Contribution:** Developed PostgreSQL procedures for conflation, including:
+      1. **Initialization:**
+         - Set up PostgreSQL databases and required software tools.
+         - Load SDOT and Seattle OSM sidewalk networks into the database.
+      2. **Preprocessing OSM Sidewalks:**
+         - Address scenarios where sidewalk segments are represented as closed linestrings in the SDOT dataset.
+         - Subsegment original network segments, enhancing conflation accuracy.
+      3. **Spatial Joins:**
+         - Execute spatial joins incorporating various methods to create conflation tables.
+      4. **Parallelism Checks:**
+         - Ensure geometrical parallelism between associated sidewalk segments to enhance conflation precision.
+      5. **Quality Assurance:**
+         - Review and validate conflation results, ensuring accuracy in matched sidewalk attributes.
+      6. **Conflation Table Generation:**
+         - Generate conflation tables containing relationships between OSM and SDOT sidewalk segments.
+      7. **Identify APS Locations:**
+         - Utilize SDOT's Accessible Pedestrian Signals (APS) dataset to pinpoint intersections in Seattle with APS.
+      8 **Update OSM Crossings:**
+         - Update or add tags to OSM crossings at identified intersections, reflecting the latest status accurately.
+      7. **Export Data:**
+         - Export conflation results in database or GeoJSON formats, facilitating easy utilization by stakeholders. 
+   - **Read more about this conflation attempt:** [SDOT2OSM: Conflation Details](SDOT2OSM/ConflationDetails.md)
+
+
+### 3. OSM Roads to Sidewalks \[ongoing\]:
+
+
 
 ## Technical Proficiency:
 
@@ -46,6 +73,6 @@ My work encompasses a range of technical skills, including expertise in GIS tool
 
 ## Results and Future Steps:
 
-The conflation processes I led have yielded tangible outcomes, including enhanced data accuracy and improved accessibility information. As we move forward, I remain committed to refining and expanding our dataset, ensuring its ongoing relevance and impact.
+The conflation processes I led have yielded tangible outcomes, including enhanced data accuracy and improved accessibility information. As we move forward, I remain committed to refining and expanding our dataset by building up the conflation reviewing tool using Leaflet, ensuring its ongoing relevance and impact.
 
 This portfolio is a testament to my dedication to leveraging technology for social good, and I am excited about the potential for positive change that our work in the Transportation Data Equity Initiative brings to communities facing mobility challenges.
