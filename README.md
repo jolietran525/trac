@@ -17,7 +17,23 @@ I have been actively engaged in three significant conflation attempts, each desi
 ### 1. ARNOLD-OSM Conflation:
    - **Purpose:** The primary goal is to identify the sidewalk segments in OpenStreetMap (OSM) that associate with a single road segment in the All Roads Network Of Linear Referenced Data (ARNOLD). This process allows us to extract traffic volume information from ARNOLD and incorporate it into our OSM sidewalk data as a new tag, utilizing the hstore data type. From the OSM perspective, this results in an additional attribute of traffic volume for sidewalk segments, providing valuable data for assessing safety when a pedestrian crosses the road. Simultaneously, we share the conflation result with ARNOLD stakeholders, enhancing their awareness of sidewalk locations and distribution.
    - **My Contribution:** Design a procedure in PostgreSQL that does the following:
-      * Pre-process the road (ARNOLD) and sidewalk (OSM) data by breaking up 
+   1. **Initialization:**
+      - Set up the databases and necessary software tools.
+      - Load the networks (OSM and ARNOLD) into the database.
+   2. **Preprocessing:**
+      - Subsegment the original network segments for better conflation.
+   3. **Spatial Joins:**
+      - Perform spatial joins using the methods described earlier to create conflation tables.
+   4. **Parallelism Checks:**
+      - Check for parallelism between associated geometries to ensure proper conflation.
+   5. **Conflation Table Generation:**
+      - Generate conflation tables containing the relationships between sidewalk and roadway segments.
+   6. **Quality Assurance:**
+      - Review and validate the conflation results.
+   7. **Export Data:**
+      - Export the conflation results in database or GeoJSON formats.
+   **Read more about this attemp:** [ARNOLD2OSM: Conflaion Explanaion](ARNOLD2OSM\ConflationExplain.md)
+
 
 ### 2. SDOT-OSM Conflation:
    - **Purpose:** Identify inconsistencies, facilitate data transfer, and pinpoint associated network segments.
