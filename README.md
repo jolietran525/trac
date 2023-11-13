@@ -32,6 +32,7 @@ I have been actively engaged in three significant conflation attempts, each desi
       - Review and validate the conflation results.
    7. **Export Data:**
       - Export the conflation results in database or GeoJSON formats.
+   
    **Read more about this attemp:** [ARNOLD2OSM: Conflaion Explanaion](ARNOLD2OSM/ConflationExplain.md)
 
 
