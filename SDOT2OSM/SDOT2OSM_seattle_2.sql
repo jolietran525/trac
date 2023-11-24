@@ -17,37 +17,24 @@ $$ LANGUAGE SQL IMMUTABLE STRICT;
 ----------------------------------------------------
 /*                 SIDEWALK DATA                  */
 ----------------------------------------------------
-CREATE TABLE sdot.boundary AS
-	SELECT ST_Buffer(ST_Union(ARRAY
-	(SELECT wkb_geometry 
-	FROM sdot.censustract )), 15) AS geom
-
-CREATE INDEX bound_geom ON sdot.boundary USING GIST (geom);
 
 -- osm sidewalk
-CREATE TEMP TABLE osm_sidewalk_bbox AS
+CREATE TABLE jolie_sdot2osm_seattle_2.osm_sidewalk AS
 	SELECT *, ST_Length(way) AS length
 	FROM planet_osm_line pol
 	WHERE   highway='footway' AND tags->'footway'='sidewalk' AND	
-			way && st_setsrid( st_makebox2d( st_makepoint(-13632381,6008135), st_makepoint(-13603222,6066353)), 3857); --45628
+			way && st_setsrid( st_makebox2d( st_makepoint(-13622750,6034238), st_makepoint(-13610407,6045103)), 3857); --14860
 
 
-CREATE TABLE jolie_sdot2osm_seattle_1.osm_sidewalk AS
-	SELECT DISTINCT sw.*
-	FROM osm_sidewalk_bbox sw
-	JOIN sdot.boundary b 
-	ON ST_Intersects(b.geom, sw.way);  --39333
-	
-
-ALTER TABLE jolie_sdot2osm_seattle_1.osm_sidewalk RENAME COLUMN way TO geom;
-CREATE INDEX sw_geom ON jolie_sdot2osm_seattle_1.osm_sidewalk USING GIST (geom);
+ALTER TABLE jolie_sdot2osm_seattle_2.osm_sidewalk RENAME COLUMN way TO geom;
+CREATE INDEX sw_geom ON jolie_sdot2osm_seattle_2.osm_sidewalk USING GIST (geom);
 
 
 
 
 -- sdot sidewalk
-DROP TABLE jolie_sdot2osm_seattle_1.sdot_sidewalk
-CREATE TABLE jolie_sdot2osm_seattle_1.sdot_sidewalk AS
+DROP TABLE jolie_sdot2osm_seattle_2.sdot_sidewalk
+CREATE TABLE jolie_sdot2osm_seattle_2.sdot_sidewalk AS
 	SELECT  ogc_fid,
 			objectid,
 			sw_width/39.37 AS sw_width,
@@ -58,11 +45,11 @@ CREATE TABLE jolie_sdot2osm_seattle_1.sdot_sidewalk AS
 	FROM sdot.sidewalks
 	WHERE   st_astext(wkb_geometry) != 'LINESTRING EMPTY'
 			AND surftype != 'UIMPRV'
-			AND sw_width != 0; -- 34848
---			AND wkb_geometry && st_setsrid( st_makebox2d( st_makepoint(-13632381,6008135), st_makepoint(-13603222,6066353)), 3857); -- 34848
+			AND sw_width != 0
+			AND wkb_geometry && st_setsrid( st_makebox2d( st_makepoint(-13622750,6034238), st_makepoint(-13610407,6045103)), 3857); -- 9148
 
 			
-CREATE INDEX sdot_seattle_geom ON jolie_sdot2osm_seattle_1.sdot_sidewalk USING GIST (geom);
+CREATE INDEX sdot_seattle_geom ON jolie_sdot2osm_seattle_2.sdot_sidewalk USING GIST (geom);
 
 
 
@@ -79,7 +66,7 @@ CREATE INDEX sdot_seattle_geom ON jolie_sdot2osm_seattle_1.sdot_sidewalk USING G
 
 -- 1. Check which OSM sidewalks are closed linestrings, break these OSM at vertices to sub-seg, number them by the order from start to end points
 
-CREATE TABLE jolie_sdot2osm_seattle_1.polygon_osm_break AS
+CREATE TABLE jolie_sdot2osm_seattle_2.polygon_osm_break AS
 	WITH segments AS (
 	    SELECT 
 		        osm_id,
@@ -90,7 +77,7 @@ CREATE TABLE jolie_sdot2osm_seattle_1.polygon_osm_break AS
 			            osm_id, 
 			            ST_DumpPoints(geom) AS pt 
 	       		FROM 
-	            		jolie_sdot2osm_seattle_1.osm_sidewalk
+	            		jolie_sdot2osm_seattle_2.osm_sidewalk
 	        	WHERE ST_IsClosed(geom)
 	       		) AS dumps 
 	)
@@ -99,31 +86,31 @@ CREATE TABLE jolie_sdot2osm_seattle_1.polygon_osm_break AS
 	FROM 
 	    segments
 	WHERE 
-	    geom IS NOT NULL; -- 3248
+	    geom IS NOT NULL; -- 283
 
 
 
 
 -- 2. Then check if the sub-seg are adjacent and parallel to each other, we run a procedure to line them up
 
-CREATE TABLE jolie_sdot2osm_seattle_1.adjacent_lines AS
+CREATE TABLE jolie_sdot2osm_seattle_2.adjacent_lines AS
 	SELECT  p1.osm_id AS osm_id
 			,p1.segment_number AS seg_a
 			,p1.geom AS geom_a
 			,p2.segment_number AS seg_b
 			,p2.geom AS geom_b
-	FROM 	jolie_sdot2osm_seattle_1.polygon_osm_break p1
-	JOIN 	jolie_sdot2osm_seattle_1.polygon_osm_break p2
+	FROM 	jolie_sdot2osm_seattle_2.polygon_osm_break p1
+	JOIN 	jolie_sdot2osm_seattle_2.polygon_osm_break p2
 	ON 		p1.osm_id = p2.osm_id
 			AND p1.segment_number < p2.segment_number
 			AND ST_Intersects(p1.geom, p2.geom)
-	WHERE	public.f_within_degrees(ST_Angle(p1.geom, p2.geom), 15); --1584
+	WHERE	public.f_within_degrees(ST_Angle(p1.geom, p2.geom), 15); --150
 
 
 
 
 
-CREATE TABLE jolie_sdot2osm_seattle_1.adjacent_linestrings (
+CREATE TABLE jolie_sdot2osm_seattle_2.adjacent_linestrings (
 	osm_id int8 NOT NULL
 	,start_seg int8 NOT NULL
 	,end_seg int8 NOT NULL
@@ -134,7 +121,7 @@ CREATE TABLE jolie_sdot2osm_seattle_1.adjacent_linestrings (
 
 -- procedure to iterate over results and join adjacent segments
 -- NOTE: if doing for other tables, updte to pass input and output tables and use dynamic SQL
-CREATE OR REPLACE PROCEDURE jolie_sdot2osm_seattle_1.stitch_segments()
+CREATE OR REPLACE PROCEDURE jolie_sdot2osm_seattle_2.stitch_segments()
 LANGUAGE plpgsql AS $$
 DECLARE 
 	_rec record;
@@ -144,7 +131,7 @@ DECLARE
 BEGIN 
 	FOR _rec IN
 		SELECT  *
-		  FROM  jolie_sdot2osm_seattle_1.adjacent_lines
+		  FROM  jolie_sdot2osm_seattle_2.adjacent_lines
 	 	ORDER BY osm_id ASC, seg_a ASC, seg_b DESC	-- sort seg_b IN descending order so that first/last segment is first on new osm_id
 	 LOOP 
 		 IF _first IS DISTINCT FROM NULL OR _prev IS DISTINCT FROM NULL THEN	-- _prev or _first record exists 
@@ -159,7 +146,7 @@ BEGIN
 		 				_prev.seg_b := _rec.seg_b;
 		 			ELSE
 		 				-- segment is not a continuation of previous; write to table
-			 			INSERT INTO jolie_sdot2osm_seattle_1.adjacent_linestrings VALUES (_prev.osm_id, _prev.seg_a, _prev.seg_b, ST_Linemerge(ST_Union(_prev.geom_a, _prev.geom_b)));
+			 			INSERT INTO jolie_sdot2osm_seattle_2.adjacent_linestrings VALUES (_prev.osm_id, _prev.seg_a, _prev.seg_b, ST_Linemerge(ST_Union(_prev.geom_a, _prev.geom_b)));
 			 			-- set _prev record since 'new' line part
 			 			_prev := _rec;
 			 		END IF;
@@ -185,11 +172,11 @@ BEGIN
 		    			_prev.seg_b := _first.seg_a;	-- will 'wrap' around END
 		    		ELSE
 		    			-- insert first record if not appended with previous at end
-			    		INSERT INTO jolie_sdot2osm_seattle_1.adjacent_linestrings VALUES (_first.osm_id, _first.seg_b, _first.seg_a, ST_Linemerge(ST_Union(_first.geom_a, _first.geom_b)));
+			    		INSERT INTO jolie_sdot2osm_seattle_2.adjacent_linestrings VALUES (_first.osm_id, _first.seg_b, _first.seg_a, ST_Linemerge(ST_Union(_first.geom_a, _first.geom_b)));
 			    	END IF;
 		    	END IF;
 		    	-- write final segment from previous osm_id to table
-		    	INSERT INTO jolie_sdot2osm_seattle_1.adjacent_linestrings VALUES (_prev.osm_id, _prev.seg_a, _prev.seg_b, ST_Linemerge(ST_Union(_prev.geom_a, _prev.geom_b)));
+		    	INSERT INTO jolie_sdot2osm_seattle_2.adjacent_linestrings VALUES (_prev.osm_id, _prev.seg_a, _prev.seg_b, ST_Linemerge(ST_Union(_prev.geom_a, _prev.geom_b)));
 		    	-- check if record is "first/last" record where seg_a is 1 and seg_b is not 2
 			 	IF _rec.seg_a = 1 AND _rec.seg_b <> 2 THEN 
 			    	 -- set as first record and set prev to NULL
@@ -226,34 +213,34 @@ BEGIN
 			_prev.seg_b := _first.seg_a;	-- will 'wrap' around END
 		ELSE
 			-- insert first record if not appended with previous at end
-			INSERT INTO jolie_sdot2osm_seattle_1.adjacent_linestrings VALUES (_first.osm_id, _first.seg_b, _first.seg_a, ST_Linemerge(ST_Union(_first.geom_a, _first.geom_b)));
+			INSERT INTO jolie_sdot2osm_seattle_2.adjacent_linestrings VALUES (_first.osm_id, _first.seg_b, _first.seg_a, ST_Linemerge(ST_Union(_first.geom_a, _first.geom_b)));
 		END IF;
 	END IF;
 	-- write final segment from previous osm_id to table
-	INSERT INTO jolie_sdot2osm_seattle_1.adjacent_linestrings VALUES (_prev.osm_id, _prev.seg_a, _prev.seg_b, ST_Linemerge(ST_Union(_prev.geom_a, _prev.geom_b)));
+	INSERT INTO jolie_sdot2osm_seattle_2.adjacent_linestrings VALUES (_prev.osm_id, _prev.seg_a, _prev.seg_b, ST_Linemerge(ST_Union(_prev.geom_a, _prev.geom_b)));
 
 END
 $$;
 
 
-CALL jolie_sdot2osm_seattle_1.stitch_segments();
+CALL jolie_sdot2osm_seattle_2.stitch_segments();
 
 
-SELECT * FROM jolie_sdot2osm_seattle_1.adjacent_linestrings;
+SELECT * FROM jolie_sdot2osm_seattle_2.adjacent_linestrings;--61
 
 -- 3. Finally, for those that's not adjacent and parallel to others, we also want to insert them into the adjacent_parallel table
 
-INSERT INTO jolie_sdot2osm_seattle_1.adjacent_linestrings
+INSERT INTO jolie_sdot2osm_seattle_2.adjacent_linestrings
 	SELECT osm_id, segment_number AS start_seg, segment_number AS end_seg, geom
-	FROM jolie_sdot2osm_seattle_1.polygon_osm_break
+	FROM jolie_sdot2osm_seattle_2.polygon_osm_break
 	WHERE (osm_id, segment_number) NOT IN
 		(
 			SELECT osm_id, seg_a AS seg
-			FROM jolie_sdot2osm_seattle_1.adjacent_lines
+			FROM jolie_sdot2osm_seattle_2.adjacent_lines
 			UNION ALL
 			SELECT osm_id, seg_b AS seg
-			FROM jolie_sdot2osm_seattle_1.adjacent_lines
-		); -- 882
+			FROM jolie_sdot2osm_seattle_2.adjacent_lines
+		); -- 72
 
 
 
@@ -269,17 +256,17 @@ INSERT INTO jolie_sdot2osm_seattle_1.adjacent_linestrings
 		-- start_end_seg: null if the osm is not preprocessed
 		-- geom
 		-- length
-CREATE TABLE jolie_sdot2osm_seattle_1.osm_sidewalk_preprocessed AS (
+CREATE TABLE jolie_sdot2osm_seattle_2.osm_sidewalk_preprocessed AS (
 	SELECT osm_id, CONCAT(start_seg, '-', end_seg) AS start_end_seg, geom, ST_Length(geom) AS length
-	FROM jolie_sdot2osm_seattle_1.adjacent_linestrings
+	FROM jolie_sdot2osm_seattle_2.adjacent_linestrings
 	
 	UNION ALL 
 	
 	SELECT osm_id, 'null' AS start_end_seg, geom, ST_Length(geom) AS length
-	FROM jolie_sdot2osm_seattle_1.osm_sidewalk
-	WHERE NOT ST_IsClosed(geom) ); -- 40665
+	FROM jolie_sdot2osm_seattle_2.osm_sidewalk
+	WHERE NOT ST_IsClosed(geom) ); -- 14973
 
-	
+CREATE INDEX osm_geom ON jolie_sdot2osm_seattle_2.osm_sidewalk_preprocessed USING GIST (geom);
 	
 
 -- changes:
@@ -290,7 +277,7 @@ CREATE TABLE jolie_sdot2osm_seattle_1.osm_sidewalk_preprocessed AS (
 	-- buffer size: sdot to sw_width*5, osm to 4
 	
 -- conflation
-CREATE TABLE jolie_sdot2osm_seattle_1.sdot2osm_sw_raw AS (
+CREATE TABLE jolie_sdot2osm_seattle_2.sdot2osm_sw_raw AS (
 	WITH ranked_roads AS (
 		SELECT 
 		  osm.osm_id AS osm_id,
@@ -334,8 +321,8 @@ CREATE TABLE jolie_sdot2osm_seattle_1.sdot2osm_sw_raw AS (
 				  			)) 
 				 END DESC
 		  	)  AS RANK
-		FROM jolie_sdot2osm_seattle_1.osm_sidewalk_preprocessed osm
-		JOIN jolie_sdot2osm_seattle_1.sdot_sidewalk sdot
+		FROM jolie_sdot2osm_seattle_2.osm_sidewalk_preprocessed osm
+		JOIN jolie_sdot2osm_seattle_2.sdot_sidewalk sdot
 		ON ST_Intersects(ST_Buffer(sdot.geom, 9, 'endcap=flat join=round'), ST_Buffer(osm.geom, 9, 'endcap=flat join=round'))
 		WHERE  CASE
 				  	WHEN (sdot.length > osm.length)
@@ -374,9 +361,7 @@ CREATE TABLE jolie_sdot2osm_seattle_1.sdot2osm_sw_raw AS (
 		  		THEN ST_Length(ST_Intersection(sdot_seg, ST_Buffer(osm_geom, 18,  'endcap=flat join=round')))/GREATEST(ST_Length(sdot_seg), ST_Length(osm_geom)) > 0.15 -- TODO: need TO give it a PARAMETER later as we wanna change
 		  	ELSE
 		  		ST_Length(ST_Intersection(osm_seg, ST_Buffer(sdot_geom, 18,  'endcap=flat join=round')))/GREATEST(ST_Length(osm_seg), ST_Length(sdot_geom)) > 0.15 -- TODO: need TO give it a PARAMETER later as we wanna change
-		  END ); -- 30832, 5006.353 secs
-
-
+		  END ); -- 11070, 483.59 secs
 
 
 
@@ -386,10 +371,10 @@ CREATE TABLE jolie_sdot2osm_seattle_1.sdot2osm_sw_raw AS (
 -- This step give us the table while filtering out overlapped segments
 		 -- If it overlapps, choose the one thats closer
 -- change: the metrics of 0.4
-CREATE TABLE jolie_sdot2osm_seattle_1.sdot2osm_sw_prepocessed AS (
+CREATE TABLE jolie_sdot2osm_seattle_2.sdot2osm_sw_prepocessed AS (
 	SELECT  *
 	FROM 
-	    jolie_sdot2osm_seattle_1.sdot2osm_sw_raw
+	    jolie_sdot2osm_seattle_2.sdot2osm_sw_raw
 	WHERE 
 	    (CONCAT(osm_id, start_end_seg), sdot_objectid) NOT IN ( 
 	    	-- case when the whole sdot already conflated to one osm, but then its subseg also conflated to another osm
@@ -430,13 +415,13 @@ CREATE TABLE jolie_sdot2osm_seattle_1.sdot2osm_sw_prepocessed AS (
 	 									END
 							  	END
 				    END AS sdot_objectid
-			FROM jolie_sdot2osm_seattle_1.sdot2osm_sw_raw r1
+			FROM jolie_sdot2osm_seattle_2.sdot2osm_sw_raw r1
 			JOIN (
 			    SELECT *
-			    FROM jolie_sdot2osm_seattle_1.sdot2osm_sw_raw
+			    FROM jolie_sdot2osm_seattle_2.sdot2osm_sw_raw
 			    WHERE (osm_id, start_end_seg) IN (
 			        SELECT osm_id, start_end_seg
-			        FROM jolie_sdot2osm_seattle_1.sdot2osm_sw_raw
+			        FROM jolie_sdot2osm_seattle_2.sdot2osm_sw_raw
 			        GROUP BY osm_id, start_end_seg
 			        HAVING count(*) > 1 ) ) r2
 			ON r1.osm_id = r2.osm_id AND r1.start_end_seg = r2.start_end_seg AND r1.sdot_objectid < r2.sdot_objectid
@@ -530,13 +515,13 @@ CREATE TABLE jolie_sdot2osm_seattle_1.sdot2osm_sw_prepocessed AS (
 				       
 				    END AS osm_id_seg,
 				    r1.sdot_objectid
-			FROM jolie_sdot2osm_seattle_1.sdot2osm_sw_raw r1
+			FROM jolie_sdot2osm_seattle_2.sdot2osm_sw_raw r1
 			JOIN (
 			        SELECT *
-			        FROM jolie_sdot2osm_seattle_1.sdot2osm_sw_raw
+			        FROM jolie_sdot2osm_seattle_2.sdot2osm_sw_raw
 			        WHERE sdot_objectid IN (
 			            SELECT sdot_objectid
-			            FROM jolie_sdot2osm_seattle_1.sdot2osm_sw_raw
+			            FROM jolie_sdot2osm_seattle_2.sdot2osm_sw_raw
 			            GROUP BY sdot_objectid
 			            HAVING count(*) > 1 ) ) r2
 			ON r1.sdot_objectid = r2.sdot_objectid AND CONCAT(r1.osm_id, r1.start_end_seg) < CONCAT(r2.osm_id, r2.start_end_seg)
@@ -590,7 +575,7 @@ CREATE TABLE jolie_sdot2osm_seattle_1.sdot2osm_sw_prepocessed AS (
 					  	    > 0.4
 				END 		
 	    	)
-	   ); -- 29494, 0.244 secs
+	   ); -- 10756, 0.161 secs
     
 
 	  
@@ -601,12 +586,12 @@ CREATE TABLE jolie_sdot2osm_seattle_1.sdot2osm_sw_prepocessed AS (
 -- create a table with metrics:
 	-- GROUP BY sdot_objectid, the SUM the length of the conflated sdot divided by the length of the original sdot:
 			 -- This will give us how much of the sdot got conflated
-CREATE TABLE jolie_sdot2osm_seattle_1.sdot2osm_metrics_sdot AS (
+CREATE TABLE jolie_sdot2osm_seattle_2.sdot2osm_metrics_sdot AS (
 	SELECT  sdot.objectid,
 			COALESCE(SUM(ST_Length(sdot2osm.conflated_sdot_seg))/ST_Length(sdot.geom), 0) AS percent_conflated,
 			ST_Transform(sdot.geom, 4326) AS geom
 			--ST_UNION(sdot2osm.conflated_sdot_seg) AS sdot_conflated_subseg 
-	FROM jolie_sdot2osm_seattle_1.sdot_sidewalk sdot
+	FROM jolie_sdot2osm_seattle_2.sdot_sidewalk sdot
 	LEFT JOIN (
 				SELECT *,
 						CASE 
@@ -616,23 +601,23 @@ CREATE TABLE jolie_sdot2osm_seattle_1.sdot2osm_metrics_sdot AS (
 							ELSE sdot_seg
 						END conflated_sdot_seg
 						
-				FROM jolie_sdot2osm_seattle_1.sdot2osm_sw_prepocessed
+				FROM jolie_sdot2osm_seattle_2.sdot2osm_sw_prepocessed
 			) sdot2osm
 	ON sdot.objectid = sdot2osm.sdot_objectid
-	GROUP BY sdot.objectid, sdot2osm.sdot_objectid, sdot.geom ); --34848
+	GROUP BY sdot.objectid, sdot2osm.sdot_objectid, sdot.geom ); --9148
 
-SELECT * FROM jolie_sdot2osm_seattle_1.sdot2osm_metrics_sdot
+SELECT * FROM jolie_sdot2osm_seattle_2.sdot2osm_metrics_sdot
 
 -- NOT IMPORTANT --
 -- create a table with metrics:
 	-- GROUP BY osm_id, the SUM the length of the conflated osm divided by the length of the original osm:
 			 -- This will give us how much of the osm got conflated
-CREATE TABLE jolie_sdot2osm_seattle_1.sdot2osm_metrics_osm AS (
+CREATE TABLE jolie_sdot2osm_seattle_2.sdot2osm_metrics_osm AS (
 		SELECT  osm.osm_id,
 				COALESCE(SUM(ST_Length(sdot2osm.conflated_osm_seg))/ST_Length(osm.geom), 0) AS percent_conflated,
 				ST_Transform(osm.geom, 4326) AS geom
 				--ST_UNION(sdot2osm.conflated_osm_seg) AS osm_conflated_subseg
-		FROM jolie_sdot2osm_seattle_1.osm_sidewalk osm
+		FROM jolie_sdot2osm_seattle_2.osm_sidewalk osm
 		LEFT JOIN (
 					SELECT *,
 							CASE 
@@ -641,16 +626,16 @@ CREATE TABLE jolie_sdot2osm_seattle_1.sdot2osm_metrics_osm AS (
 									ST_LineSubstring( osm_geom, LEAST(ST_LineLocatePoint(osm_geom, ST_ClosestPoint(st_startpoint(sdot_seg), osm_geom)) , ST_LineLocatePoint(osm_geom, ST_ClosestPoint(st_endpoint(sdot_seg), osm_geom))), GREATEST(ST_LineLocatePoint(osm_geom, ST_ClosestPoint(st_startpoint(sdot_seg), osm_geom)) , ST_LineLocatePoint(osm_geom, ST_ClosestPoint(st_endpoint(sdot_seg), osm_geom))) )
 								ELSE osm_seg
 							END conflated_osm_seg
-					FROM jolie_sdot2osm_seattle_1.sdot2osm_sw_prepocessed
+					FROM jolie_sdot2osm_seattle_2.sdot2osm_sw_prepocessed
 				) sdot2osm
 		ON osm.osm_id = sdot2osm.osm_id
-		GROUP BY osm.osm_id, sdot2osm.osm_id, osm.geom ); -- 39333
+		GROUP BY osm.osm_id, sdot2osm.osm_id, osm.geom ); -- 14860
 
-SELECT * FROM jolie_sdot2osm_seattle_1.sdot2osm_metrics_osm
+SELECT * FROM jolie_sdot2osm_seattle_2.sdot2osm_metrics_osm
 
 
 
-CREATE TABLE jolie_sdot2osm_seattle_1.sidewalk AS
+CREATE TABLE jolie_sdot2osm_seattle_2.sidewalk AS
 	SELECT  osm_id,
 			start_end_seg,
 		    sdot_objectid,
@@ -680,7 +665,7 @@ CREATE TABLE jolie_sdot2osm_seattle_1.sidewalk AS
 		    END AS way,
 		    osm_geom,
 		    sdot_geom
-	FROM jolie_sdot2osm_seattle_1.sdot2osm_sw_prepocessed; -- 29794, 0.160 secs
+	FROM jolie_sdot2osm_seattle_2.sdot2osm_sw_prepocessed; -- 10756, 0.065 secs
 
 
 
@@ -688,7 +673,7 @@ CREATE TABLE jolie_sdot2osm_seattle_1.sidewalk AS
 
 -- changes: add start_end_seg, transform geom
 -- FINAL TABLE that will be exported
-CREATE TABLE jolie_sdot2osm_seattle_1.sidewalk_json AS (
+CREATE TABLE jolie_sdot2osm_seattle_2.sidewalk_json AS (
 	SELECT  sdot2osm.osm_id,
 			sdot2osm.start_end_seg,
 			sdot2osm.sdot_objectid,
@@ -700,8 +685,8 @@ CREATE TABLE jolie_sdot2osm_seattle_1.sidewalk_json AS (
 			conflated_score,
 			original_way,
 			ST_Transform(sdot2osm.way, 4326) AS way 
-	FROM jolie_sdot2osm_seattle_1.sidewalk sdot2osm
-	LEFT JOIN jolie_sdot2osm_seattle_1.osm_sidewalk osm
+	FROM jolie_sdot2osm_seattle_2.sidewalk sdot2osm
+	LEFT JOIN jolie_sdot2osm_seattle_2.osm_sidewalk osm
 	ON sdot2osm.osm_id = osm.osm_id -- 1819
 	
 	UNION
@@ -721,48 +706,49 @@ CREATE TABLE jolie_sdot2osm_seattle_1.sidewalk_json AS (
 				ELSE 'yes'
 			END AS original_way,
 			ST_Transform(pre_osm.geom, 4326) AS way
-	FROM jolie_sdot2osm_seattle_1.osm_sidewalk_preprocessed pre_osm 
-	LEFT JOIN jolie_sdot2osm_seattle_1.osm_sidewalk osm
+	FROM jolie_sdot2osm_seattle_2.osm_sidewalk_preprocessed pre_osm 
+	LEFT JOIN jolie_sdot2osm_seattle_2.osm_sidewalk osm
 	ON osm.osm_id = pre_osm.osm_id
 	WHERE (pre_osm.osm_id, pre_osm.start_end_seg) NOT IN (
 			SELECT DISTINCT osm_id, start_end_seg
-			FROM jolie_sdot2osm_seattle_1.sidewalk ) -- 20942
-	); --44052, 0.156 secs
+			FROM jolie_sdot2osm_seattle_2.sidewalk ) -- 20942
+	); --15992, 0.065 secs
 	  
 
 	
 ----------------------------------------------------
 /*                 CROSSING DATA                  */
 ----------------------------------------------------
-CREATE TABLE jolie_sdot2osm_seattle_1.osm_crossing AS
+CREATE TABLE jolie_sdot2osm_seattle_2.osm_crossing AS
 	SELECT *
 	FROM planet_osm_line pol 
 	WHERE   highway='footway' AND tags->'footway'='crossing' AND
-			way && st_setsrid( st_makebox2d( st_makepoint(-13632381,6008135), st_makepoint(-13603222,6066353)), 3857); --1034
+			way && st_setsrid( st_makebox2d( st_makepoint(-13622750,6034238), st_makepoint(-13610407,6045103)), 3857); --1034
 
-ALTER TABLE jolie_sdot2osm_seattle_1.osm_crossing RENAME COLUMN way TO geom;
-CREATE INDEX crossing_geom ON jolie_sdot2osm_seattle_1.osm_crossing USING GIST (geom);
+ALTER TABLE jolie_sdot2osm_seattle_2.osm_crossing RENAME COLUMN way TO geom;
+CREATE INDEX crossing_geom ON jolie_sdot2osm_seattle_2.osm_crossing USING GIST (geom);
 			
 			
 			
-CREATE TABLE jolie_sdot2osm_seattle_1.sdot_accpedsig AS
+CREATE TABLE jolie_sdot2osm_seattle_2.sdot_accpedsig AS
 	SELECT *
 	FROM sdot.accessible_pedestrian_signals aps
-	WHERE  wkb_geometry && st_setsrid( st_makebox2d( st_makepoint(-13632381,6008135), st_makepoint(-13603222,6066353)), 3857); -- 22
+	WHERE  wkb_geometry && st_setsrid( st_makebox2d( st_makepoint(-13622750,6034238), st_makepoint(-13610407,6045103)), 3857); -- 22
 
-ALTER TABLE jolie_sdot2osm_seattle_1.sdot_accpedsig RENAME COLUMN wkb_geometry TO geom;
+ALTER TABLE jolie_sdot2osm_seattle_2.sdot_accpedsig RENAME COLUMN wkb_geometry TO geom;
+CREATE INDEX geom ON jolie_sdot2osm_seattle_2.sdot_accpedsig USING GIST (geom);
 	
 
 -- test and see which buffer size works
 SELECT osm.geom, sdot.geom, ST_Buffer(osm.geom, 10, 'endcap=flat join=round'), ST_Buffer(sdot.geom, 20)
-FROM jolie_sdot2osm_seattle_1.osm_crossing osm 
-JOIN jolie_sdot2osm_seattle_1.sdot_accpedsig sdot
+FROM jolie_sdot2osm_seattle_2.osm_crossing osm 
+JOIN jolie_sdot2osm_seattle_2.sdot_accpedsig sdot
 ON ST_Intersects(ST_Buffer(osm.geom, 10, 'endcap=flat join=round'), ST_Buffer(sdot.geom, 20))
 
 
 -- FINAL TABLE
 -- changes: transform, buffer size
-CREATE TABLE jolie_sdot2osm_seattle_1.crossing_json AS (
+CREATE TABLE jolie_sdot2osm_seattle_2.crossing_json AS (
 	SELECT 
 		osm.osm_id, osm.highway,
 		(osm.tags ||
@@ -773,8 +759,8 @@ CREATE TABLE jolie_sdot2osm_seattle_1.crossing_json AS (
 		hstore('crossing:signals:countdown', 'yes')) AS tags,
 		ST_Transform(osm.geom, 4326) AS way
 	FROM (SELECT osm.osm_id, osm.highway, osm.tags, osm.geom
-		FROM jolie_sdot2osm_seattle_1.osm_crossing osm 
-		JOIN jolie_sdot2osm_seattle_1.sdot_accpedsig sdot
+		FROM jolie_sdot2osm_seattle_2.osm_crossing osm 
+		JOIN jolie_sdot2osm_seattle_2.sdot_accpedsig sdot
 		ON ST_Intersects(ST_Buffer(osm.geom, 10, 'endcap=flat join=round'), ST_Buffer(sdot.geom, 20))
 		) osm
 	
@@ -782,9 +768,9 @@ CREATE TABLE jolie_sdot2osm_seattle_1.crossing_json AS (
 	
 	-- IF the crossing did NOT conflate:
 	SELECT osm.osm_id, osm.highway, osm.tags, ST_Transform(osm.geom, 4326) AS way
-	FROM jolie_sdot2osm_seattle_1.osm_crossing osm
+	FROM jolie_sdot2osm_seattle_2.osm_crossing osm
 	WHERE osm.osm_id NOT IN (
 		SELECT osm.osm_id
-		FROM jolie_sdot2osm_seattle_1.osm_crossing osm 
-		JOIN jolie_sdot2osm_seattle_1.sdot_accpedsig sdot
+		FROM jolie_sdot2osm_seattle_2.osm_crossing osm 
+		JOIN jolie_sdot2osm_seattle_2.sdot_accpedsig sdot
 		ON ST_Intersects(ST_Buffer(osm.geom, 10, 'endcap=flat join=round'), ST_Buffer(sdot.geom, 20))) ); -- 1034
