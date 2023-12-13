@@ -30,8 +30,6 @@ I have been actively engaged in three significant conflation attempts, each desi
          - Generate conflation tables containing the relationships between sidewalk and roadway segments.
       6. **Quality Assurance:**
          - Review and validate the conflation results.
-      7. **Export Data:**
-         - Export the conflation results in database or GeoJSON formats.
    - **Read more about this conflation attempt:** [ARNOLD2OSM: Conflation Explanaion](ARNOLD2OSM/ConflationExplain.md)
 
 
@@ -63,8 +61,6 @@ I have been actively engaged in three significant conflation attempts, each desi
          - Utilize SDOT's Accessible Pedestrian Signals (APS) dataset to pinpoint intersections in Seattle with APS.
       9 **Update OSM Crossings:**
          - Update or add tags to OSM crossings at identified intersections, reflecting the latest status accurately.
-      10. **Export Data:**
-         - Export conflation results in database or GeoJSON formats, facilitating easy utilization by stakeholders. 
    - **Read more about this conflation attempt:** [SDOT2OSM: Conflation Details](SDOT2OSM/ConflationDetails.md)
 
 
@@ -74,7 +70,10 @@ I have been actively engaged in three significant conflation attempts, each desi
 
 ## Technical Proficiency:
 
-My work encompasses a range of technical skills, including expertise in GIS tools, data integration, and conflation techniques. By leveraging these skills, I contribute to the creation of a robust and reliable sidewalk dataset that serves the diverse needs of our community.
+My work encompasses a range of technical skills, including:
+- expertise in GIS tools
+- **Logical Reasoning and Problem Solving:** Define a set of rules for data cleaning, data transformation, and data alignment from disparate source, solve the challenges with prom
+By leveraging these skills, I contribute to the creation of a robust and reliable sidewalk dataset that serves the diverse needs of our community.
 
 ## Results and Future Steps:
 
