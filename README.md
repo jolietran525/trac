@@ -37,28 +37,33 @@ I have been actively engaged in three significant conflation attempts, each desi
 
 ### 2. SDOT-OSM Conflation:
    - **Purpose:** The primary goal is to:
-      1. Identify Seattle sidewalks in OpenStreetMap (OSM) corresponding to the Seattle Department of Transportation (SDOT) sidewalk datasets. Attributes like sidewalk width, slope, and surface type from SDOT are integrated into OSM sidewalk data. Additionally, we aim to identify sidewalk segments in SDOT that do not exist in OSM, facilitating data enrichment in OSM.
+      1. Identify Seattle sidewalks in OpenStreetMap (OSM) corresponding to the Seattle Department of Transportation (SDOT) sidewalk datasets. Attributes like sidewalk width, slope, and surface type from SDOT are integrated into OSM sidewalk data. Additionally, we aim to identify sidewalk segments in SDOT that do not exist in OSM and those that are in OSM but not in SDOT, facilitating data enrichment in both OSM and SDOT.
       2. Pinpoint intersections in Seattle with Accessible Pedestrian Signals (APS) using SDOT's APS dataset. Then, update or add tags to OSM crossings at these intersections to reflect the latest status accurately.
    - **My Contribution:** Developed PostgreSQL procedures for conflation, including:
       1. **Initialization:**
          - Set up PostgreSQL databases and required software tools.
          - Load SDOT and Seattle OSM sidewalk networks into the database.
       2. **Preprocessing OSM Sidewalks:**
-         - Address scenarios where sidewalk segments are represented as closed linestrings in the SDOT dataset.
+         - Address scenarios where sidewalk segments are represented as closed line strings in the OSM dataset.
          - Subsegment original network segments, enhancing conflation accuracy.
-      3. **Spatial Joins:**
-         - Execute spatial joins incorporating various methods to create conflation tables.
-      4. **Parallelism Checks:**
-         - Ensure geometrical parallelism between associated sidewalk segments to enhance conflation precision.
-      5. **Quality Assurance:**
-         - Review and validate conflation results, ensuring accuracy in matched sidewalk attributes.
-      6. **Conflation Table Generation:**
+      3. **Preprocessing SDOT Sidewalks:**
+         - Address the scenarios where the SDOT sidewalks are stored as MultiLinestring instead of Linestring, which would cause errors in performing spatial analysis due to a mismatch of datatype.
+         - Use `ST_Dump` to convert the MultiLinestring into Linestring.
+      5. **Spatial Joins:**
+         - Execute spatial joins incorporating various methods (`ST_Buffer` and `ST_Intersects`) to create an initial link between SDOT and OSM sidewalks datasets based on distance.
+      6. **Segmentize and Parallelism Checks:**
+         - Take the shorter segment between the two sidewalks (either SDOT or OSM) that is linked from the previous step, and project it onto the longer one based on the start and end point of the shorter segment. That results in a subsegment of a longer segment that is based upon the geometry of the shorter one.
+         - Ensure geometrical parallelism by checking if the angle between the sidewalk segment and the subsegment is within a certain threshold to make sure this sidewalk in OSM is the exact sidewalk in SDOT.
+      7. **Quality Assurance:**
+         - Develop a conflation score system to automatically reject the conflation result that has a low score.
+         - Review and validate conflation procedure (keep improving the procedure above) and results (develop a [web map interface](https://jolietran525.github.io/trac-leaflet-map/index.html)), ensuring accuracy in matched sidewalk attributes.
+      8. **Conflation Table Generation:**
          - Generate conflation tables containing relationships between OSM and SDOT sidewalk segments.
-      7. **Identify APS Locations:**
+      9. **Identify APS Locations:**
          - Utilize SDOT's Accessible Pedestrian Signals (APS) dataset to pinpoint intersections in Seattle with APS.
-      8 **Update OSM Crossings:**
+      9 **Update OSM Crossings:**
          - Update or add tags to OSM crossings at identified intersections, reflecting the latest status accurately.
-      7. **Export Data:**
+      10. **Export Data:**
          - Export conflation results in database or GeoJSON formats, facilitating easy utilization by stakeholders. 
    - **Read more about this conflation attempt:** [SDOT2OSM: Conflation Details](SDOT2OSM/ConflationDetails.md)
 
